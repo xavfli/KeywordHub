@@ -68,19 +68,26 @@ The app also builds clickable result URLs for each suggestion so you can continu
 
 ## Installation
 
-### 1. Create a virtual environment
+### 1. Clone the repository from GitHub
+
+```powershell
+git clone https://github.com/xavfli/KeywordHub.git
+cd KeywordHub
+```
+
+### 2. Create a virtual environment
 
 ```powershell
 python -m venv venv
 ```
 
-### 2. Activate the virtual environment
+### 3. Activate the virtual environment
 
 ```powershell
 .\venv\Scripts\Activate.ps1
 ```
 
-### 3. Install dependencies
+### 4. Install dependencies
 
 ```powershell
 python -m pip install --upgrade pip
