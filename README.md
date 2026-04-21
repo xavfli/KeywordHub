@@ -1,74 +1,161 @@
 # KeywordHub
 
-`KeywordHub` bu `pure Python` asosida yozilgan kalit so'z tahlili va live search suggestion platformasi. Ilova `Streamlit` bilan ishlaydi va ikki asosiy bo'limdan iborat:
+`KeywordHub` is a Streamlit-based keyword research workspace for analyzing text and collecting live search suggestions in one place.
 
-- `Matn tahlili` - matndan kalit so'zlar, n-gramlar va muhim iboralarni ajratadi
-- `Qidiruv takliflari` - Google, YouTube va Bing dan live suggestion olib keladi
+It is designed for fast content research workflows:
 
-## Asosiy imkoniyatlar
+- extract keywords from raw text
+- detect 2-word and 3-word n-grams
+- surface important phrases with RAKE and optional KeyBERT support
+- fetch live suggestions from Google, YouTube, and Bing
+- export results as `TXT` or `CSV`
 
-- TF-IDF orqali kalit so'zlarni topish
-- 2 va 3 so'zli n-gramlarni ajratish
-- Stop-word filtrlash
-- RAKE asosida muhim iboralarni topish
-- KeyBERT mavjud bo'lsa, qo'shimcha semantik phrase extraction
-- Google, YouTube, Bing suggestion API laridan parallel natija olish
-- TXT va CSV formatda eksport
-- Fayldan matn yuklash: `.txt`, `.md`, `.csv`
+## What It Does
 
-## Loyiha tuzilmasi
+KeywordHub has two main modules:
 
-- `app.py` - Streamlit interfeys
-- `keywordhub/analyzer.py` - matn tahlili logikasi
-- `keywordhub/suggestions.py` - qidiruv takliflari uchun API chaqiriqlari
-- `keywordhub/exporters.py` - TXT va CSV eksport yordamchilari
-- `requirements.txt` - kerakli kutubxonalar ro'yxati
+### 1. Text Analysis
 
-## O'rnatish
+Use this mode to process pasted text or uploaded files and identify meaningful terms.
 
-### 1. Virtual environment yaratish
+Included analysis methods:
+
+- frequency-based keyword scoring
+- TF-IDF keyword extraction
+- 2-gram and 3-gram detection
+- RAKE phrase extraction
+- optional KeyBERT phrase extraction with graceful fallback
+
+Supported input files:
+
+- `.txt`
+- `.md`
+- `.csv`
+
+### 2. Search Suggestions
+
+Use this mode to discover real-time suggestion ideas from:
+
+- Google
+- YouTube
+- Bing
+
+The app also builds clickable result URLs for each suggestion so you can continue research directly from the interface.
+
+## Features
+
+- Streamlit web interface with a polished responsive layout
+- multilingual token handling for English, Uzbek, and Russian text
+- built-in stopword filtering
+- combined keyword scoring from frequency and TF-IDF
+- phrase extraction with fallback behavior when optional NLP dependencies are unavailable
+- parallel suggestion fetching with async requests
+- export to `TXT` and `CSV`
+
+## Project Structure
+
+```text
+.
+|-- app.py
+|-- requirements.txt
+|-- keywordhub/
+|   |-- __init__.py
+|   |-- analyzer.py
+|   |-- exporters.py
+|   `-- suggestions.py
+`-- README.md
+```
+
+## Installation
+
+### 1. Create a virtual environment
 
 ```powershell
 python -m venv venv
 ```
 
-### 2. Virtual environment ni yoqish
+### 2. Activate the virtual environment
 
 ```powershell
 .\venv\Scripts\Activate.ps1
 ```
 
-### 3. Kutubxonalarni o'rnatish
+### 3. Install dependencies
 
 ```powershell
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4. Ilovani ishga tushirish
+## Run The App
 
 ```powershell
 python -m streamlit run app.py
 ```
 
-Brauzerda odatda shu manzil ochiladi:
+Default local URL:
 
 ```text
 http://localhost:8501
 ```
 
-## Muhim eslatmalar
+## Usage
 
-- `KeyBERT` importi endi `lazy load` qilingan. Agar u yoki unga bog'liq `torch/torchvision` kutubxonalari bo'lmasa ham, ilova ochiladi.
-- `KeyBERT` ishlamasa, ilova TF-IDF, n-gram va RAKE bilan ishlashda davom etadi.
-- Internet bo'lmasa yoki API cheklansa, `suggestion` bo'limida ayrim manbalardan natija chiqmasligi mumkin.
+### Text Analysis Workflow
 
-## Qisqa ishga tushirish
+1. Open the `Matn tahlili` section.
+2. Paste text or upload a supported file.
+3. Choose how many top results you want.
+4. Run the analysis.
+5. Export keyword, n-gram, or phrase results as `TXT` or `CSV`.
 
-Agar `venv` allaqachon tayyor bo'lsa:
+### Suggestion Research Workflow
+
+1. Open the `Qidiruv takliflari` section.
+2. Enter a seed query.
+3. Let the app auto-refresh or click the fetch button.
+4. Review suggestions from Google, YouTube, and Bing.
+5. Export the combined list if needed.
+
+## Dependencies
+
+Main libraries used in this project:
+
+- `streamlit`
+- `httpx`
+- `pandas`
+- `scikit-learn`
+- `rake-nltk`
+- `keybert`
+- `nltk`
+
+## Notes
+
+- `KeyBERT` is treated as optional at runtime. If it cannot be imported or its deep-learning dependencies are missing, the app still works with TF-IDF, n-grams, and RAKE.
+- Search suggestion results depend on internet access and third-party service availability.
+- Uploaded files are decoded as UTF-8 with graceful fallback behavior.
+
+## Best For
+
+KeywordHub is useful for:
+
+- SEO keyword discovery
+- content planning
+- topic clustering
+- blog outline preparation
+- search intent exploration
+- multilingual text analysis experiments
+
+## Quick Start
+
+If your environment is already prepared:
 
 ```powershell
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python -m streamlit run app.py
 ```
+
+## License
+
+No license file is currently included in this repository. Add one if you want to define reuse terms explicitly.
