@@ -1,299 +1,649 @@
 from __future__ import annotations
 
-import asyncio
+from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from keywordhub.analyzer import AnalysisResult, analyze_text, extract_text_from_file
-from keywordhub.exporters import keywords_to_text, rows_to_csv_bytes, suggestions_to_text
-from keywordhub.suggestions import SuggestionPanel, fetch_suggestions
+from keywordhub.analyzer import AnalysisResult, KeywordItem, analyze_text, extract_text_from_file
+from keywordhub.exporters import keywords_to_text, rows_to_csv_bytes
 
 
-st.set_page_config(
-    page_title="KeywordHub",
-    page_icon="KH",
-    layout="wide",
-    initial_sidebar_state="expanded",
+DEMO_USERS = {"admin": "12345", "demo": "demo123", "asad": "12345"}
+METHODS = {
+    "TF-IDF": ("Σ", "Eng muhim so'zlarni TF-IDF algoritmi yordamida topadi."),
+    "N-gram": ("N", "So'z birikmalarini, bi-gram va tri-gramlarni aniqlaydi."),
+    "TextRank": ("☆", "Matn ichidagi bog'liqlikka asoslangan usul."),
+    "YAKE": ("Y", "Kalit so'zlarni avtomatik ajratib oladi."),
+    "RAKE": ("R", "So'zlar orasidagi bog'lanishga asoslangan usul."),
+}
+SAMPLE_TEXT = (
+    "Sun'iy intellekt zamonaviy texnologiyalarning eng muhim yo'nalishlaridan biridir. "
+    "U katta hajmdagi ma'lumotlarni tahlil qilish, muammolarni hal etish va "
+    "avtomatlashtirish jarayonlarini tezlashtirishga yordam beradi."
 )
+
+
+st.set_page_config(page_title="KeyWord AI", page_icon="KW", layout="wide", initial_sidebar_state="expanded")
+
 
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
     :root {
-        --bg: #f7efe3;
-        --bg-soft: #fffaf3;
-        --surface: rgba(255, 251, 245, 0.92);
-        --surface-strong: #fffdf9;
-        --ink: #201811;
-        --muted: #6e6256;
-        --accent: #c96a42;
-        --accent-dark: #9f4e2d;
-        --accent-soft: rgba(201, 106, 66, 0.12);
-        --line: rgba(71, 53, 35, 0.12);
-        --shadow: 0 18px 44px rgba(88, 63, 33, 0.10);
-        --shadow-soft: 0 10px 24px rgba(88, 63, 33, 0.08);
+        --ink: #111827;
+        --muted: #667085;
+        --line: #e7e7f1;
+        --soft: #f7f7fe;
+        --accent: #4f46e5;
+        --accent-2: #635bff;
+        --accent-soft: #f1efff;
+        --success: #10b981;
+        --warning: #f97316;
+        --shadow: 0 16px 40px rgba(17, 24, 39, 0.08);
     }
 
     html, body, [class*="css"] {
-        font-family: "Space Grotesk", sans-serif;
+        font-family: "Inter", sans-serif;
+        color: var(--ink);
     }
 
     .stApp {
-        color: var(--ink);
-        background:
-            radial-gradient(circle at top left, rgba(201, 106, 66, 0.16), transparent 24%),
-            radial-gradient(circle at top right, rgba(93, 140, 122, 0.12), transparent 18%),
-            linear-gradient(180deg, #efe2d0 0%, var(--bg) 42%, #fcf8f1 100%);
+        background: #fbfcff;
+    }
+
+    header[data-testid="stHeader"],
+    div[data-testid="stToolbar"],
+    #MainMenu,
+    footer {
+        display: none !important;
     }
 
     .block-container {
-        max-width: 1220px;
-        padding-top: 1.6rem;
-        padding-bottom: 2.8rem;
+        max-width: 1320px;
+        padding: 1.25rem 2rem 2.5rem;
     }
 
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2a211a 0%, #221b16 100%);
-        border-right: 1px solid rgba(255,255,255,0.06);
+        background: #ffffff;
+        border-right: 1px solid var(--line);
     }
 
-    section[data-testid="stSidebar"] * {
-        color: #f8efe0 !important;
+    section[data-testid="stSidebar"] .stButton button {
+        min-height: 48px !important;
+        border-radius: 10px !important;
+        background: transparent !important;
+        color: #475467 !important;
+        border: 1px solid transparent !important;
+        box-shadow: none !important;
+        justify-content: flex-start !important;
+        padding-left: 16px !important;
+        font-weight: 600 !important;
     }
 
-    div[data-testid="stMetric"] {
-        background: var(--surface);
+    section[data-testid="stSidebar"] .stButton button:hover {
+        background: var(--accent-soft) !important;
+        color: var(--accent) !important;
+        border-color: transparent !important;
+    }
+
+    .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #0b102d;
+        font-size: 24px;
+        font-weight: 800;
+        padding: 8px 0 22px;
+    }
+
+    .brand-mark {
+        width: 38px;
+        height: 38px;
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--accent);
+        font-weight: 800;
+        font-size: 13px;
+    }
+
+    .top-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 12px 0 20px;
+        border-bottom: 1px solid var(--line);
+        margin: -8px 0 38px;
+    }
+
+    .nav-links {
+        display: flex;
+        justify-content: center;
+        gap: 38px;
+        flex: 1;
+    }
+
+    .nav-links a {
+        color: #111827 !important;
+        text-decoration: none;
+        font-weight: 700;
+        padding: 18px 0;
+    }
+
+    .nav-links a.active {
+        color: var(--accent) !important;
+        border-bottom: 2px solid var(--accent);
+    }
+
+    .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+        align-items: center;
+        gap: 72px;
+        min-height: 560px;
+        padding: 28px 0 34px;
+    }
+
+    .pill {
+        display: inline-flex;
+        padding: 8px 16px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-weight: 700;
+        font-size: 15px;
+        margin-bottom: 26px;
+    }
+
+    .hero h1 {
+        margin: 0 0 24px;
+        font-size: 64px;
+        line-height: 1.12;
+        letter-spacing: 0;
+        color: #081033;
+        font-weight: 800;
+        max-width: 660px;
+    }
+
+    .hero h1 span {
+        color: var(--accent);
+    }
+
+    .hero p {
+        color: #475467;
+        font-size: 21px;
+        line-height: 1.65;
+        margin-bottom: 34px;
+        max-width: 580px;
+    }
+
+    .hero-demo {
+        position: relative;
+        min-height: 460px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .demo-blob {
+        position: absolute;
+        inset: 10px 0;
+        border-radius: 42% 58% 44% 56%;
+        background: #eeeafd;
+    }
+
+    .demo-card {
+        position: relative;
+        z-index: 1;
+        width: min(690px, 100%);
+        background: rgba(255,255,255,0.9);
         border: 1px solid var(--line);
-        border-radius: 22px;
-        padding: 12px 14px;
-        box-shadow: var(--shadow-soft);
+        border-radius: 24px;
+        padding: 24px;
+        box-shadow: var(--shadow);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 22px;
     }
 
-    div[data-testid="stMetric"] label {
-        color: var(--muted) !important;
-        font-family: "IBM Plex Mono", monospace;
-        letter-spacing: 0.04em;
+    .demo-panel {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 24px;
+        min-height: 300px;
     }
 
-    div[data-testid="stMetricValue"] {
+    .demo-title {
+        font-size: 22px;
+        font-weight: 800;
+        margin-bottom: 24px;
+    }
+
+    .line {
+        height: 10px;
+        background: #e7eaf2;
+        border-radius: 999px;
+        margin: 12px 0;
+    }
+
+    .chip-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+    }
+
+    .demo-chip {
+        background: #edeaff;
+        color: #312e81;
+        border-radius: 10px;
+        padding: 12px 10px;
+        font-weight: 800;
+        text-align: center;
+        font-size: 14px;
+    }
+
+    .arrow-bubble {
+        position: absolute;
+        z-index: 2;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 46px;
+        height: 46px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 26px;
+        font-weight: 700;
+    }
+
+    .section-band {
+        margin: 54px -2rem -2.5rem;
+        padding: 56px 2rem 72px;
+        background: #faf9ff;
+        border-top: 1px solid #f0eefc;
+    }
+
+    .section-title {
+        text-align: center;
+        font-size: 34px;
+        font-weight: 800;
+        color: #081033;
+        margin: 8px 0 42px;
+    }
+
+    .step-card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 28px;
+        min-height: 220px;
+        box-shadow: 0 12px 30px rgba(17,24,39,0.05);
+    }
+
+    .step-card h3 {
+        color: #111827;
+        font-size: 22px;
+        font-weight: 800;
+        margin: 0 0 10px;
+    }
+
+    .step-card p {
+        color: #475467;
+        font-size: 16px;
+        line-height: 1.6;
+        margin: 0;
+    }
+
+    .step-icon {
+        width: 70px;
+        height: 70px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        font-weight: 800;
+        margin-bottom: 22px;
+    }
+
+    .section-band .pill {
+        color: var(--accent);
+        background: var(--accent-soft);
+    }
+
+    .section-band ::selection,
+    .hero ::selection,
+    .auth-copy-panel ::selection {
+        background: rgba(79,70,229,0.18);
+        color: #111827;
+    }
+
+    .page-title {
+        font-size: 30px;
+        font-weight: 800;
+        margin: 0;
+        color: #111827;
+    }
+
+    .page-subtitle {
+        color: var(--muted);
+        font-size: 16px;
+        margin: 8px 0 24px;
+    }
+
+    h1, h2, h3, h4, h5, h6,
+    div[data-testid="stMarkdownContainer"] h1,
+    div[data-testid="stMarkdownContainer"] h2,
+    div[data-testid="stMarkdownContainer"] h3,
+    div[data-testid="stMarkdownContainer"] h4,
+    div[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stRadio"] label,
+    div[data-testid="stRadio"] label *,
+    div[data-testid="stCheckbox"] label,
+    div[data-testid="stCheckbox"] label * {
         color: var(--ink) !important;
+        opacity: 1 !important;
+        -webkit-text-fill-color: var(--ink) !important;
     }
 
-    div[data-testid="stTextInputRootElement"] > div,
+    div[data-testid="stRadio"] [data-testid="stCaptionContainer"],
+    div[data-testid="stRadio"] [data-testid="stCaptionContainer"] *,
+    div[data-testid="stCaptionContainer"],
+    div[data-testid="stCaptionContainer"] * {
+        color: var(--muted) !important;
+        opacity: 1 !important;
+        -webkit-text-fill-color: var(--muted) !important;
+    }
+
+    .work-card {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 18px;
+        box-shadow: 0 10px 28px rgba(17,24,39,0.04);
+    }
+
+    .method-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        min-height: 74px;
+        background: #fff;
+    }
+
+    .method-card.active {
+        border-color: var(--accent);
+        background: #f8f7ff;
+    }
+
+    .method-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+
+    .method-badge {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+    }
+
+    .method-copy {
+        color: var(--muted);
+        font-size: 13px;
+        padding-left: 46px;
+    }
+
     div[data-testid="stTextArea"] textarea,
-    div[data-testid="stFileUploader"] section {
-        background: rgba(255, 250, 243, 0.94) !important;
-        border-radius: 18px !important;
-        border: 1px solid rgba(71, 53, 35, 0.14) !important;
+    div[data-testid="stFileUploader"] section,
+    div[data-testid="stTextInputRootElement"] > div,
+    div[data-baseweb="select"] > div {
+        background: #ffffff !important;
+        border-color: var(--line) !important;
+        color: var(--ink) !important;
+        border-radius: 10px !important;
+    }
+
+    div[data-testid="stTextArea"] textarea::placeholder,
+    div[data-testid="stTextInputRootElement"] input::placeholder {
+        color: #98a2b3 !important;
+        opacity: 1 !important;
     }
 
     div[data-testid="stFileUploader"] section,
     div[data-testid="stFileUploader"] section * {
+        background: #ffffff !important;
         color: var(--ink) !important;
     }
 
-    label,
-    div[data-testid="stWidgetLabel"],
-    div[data-testid="stFileUploader"] label,
-    div[data-testid="stTextInput"] label,
-    div[data-testid="stTextArea"] label,
-    div[data-testid="stSlider"] label,
-    div[data-testid="stToggle"] label,
-    div.row-widget label,
-    .stMarkdown p,
-    .stCaptionContainer,
-    small {
+    div[data-testid="stFileUploaderFile"],
+    div[data-testid="stFileUploader"] [data-baseweb="tag"] {
+        background: #ffffff !important;
         color: var(--ink) !important;
-        opacity: 1 !important;
-    }
-
-    div[data-testid="stTextInputRootElement"] input,
-    div[data-testid="stTextArea"] textarea {
-        color: var(--ink) !important;
-        -webkit-text-fill-color: var(--ink) !important;
-    }
-
-    div[data-testid="stTextInputRootElement"] input::placeholder,
-    div[data-testid="stTextArea"] textarea::placeholder {
-        color: #8f8173 !important;
-    }
-
-    div[data-testid="stFileUploaderDropzoneInstructions"] span,
-    div[data-testid="stFileUploaderDropzoneInstructions"] small,
-    div[data-testid="stFileUploaderDropzoneInstructions"] div,
-    div[data-testid="stTextInputInstructions"],
-    div[data-testid="stTextInputInstructions"] * {
-        color: var(--muted) !important;
-        opacity: 1 !important;
-    }
-
-    div[data-testid="stFileUploader"] button {
-        background: #1a2030 !important;
-        color: #fff8f0 !important;
-        border: 1px solid rgba(255, 255, 255, 0.06) !important;
-    }
-
-    div[data-testid="stFileUploader"] button * {
-        color: #fff8f0 !important;
-    }
-
-    div[data-testid="stTextInputRootElement"] > div:focus-within,
-    div[data-testid="stTextArea"] textarea:focus {
-        box-shadow: 0 0 0 3px rgba(201, 106, 66, 0.14) !important;
-        border-color: rgba(201, 106, 66, 0.35) !important;
-    }
-
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 999px;
-        background: rgba(255, 250, 243, 0.85);
-        border: 1px solid rgba(71, 53, 35, 0.10);
-        padding: 8px 16px;
-        transition: all 180ms ease;
-    }
-
-    .stTabs [data-baseweb="tab"]:hover {
-        transform: translateY(-1px);
-        border-color: rgba(201, 106, 66, 0.22);
-    }
-
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, var(--accent), var(--accent-dark));
-        color: white !important;
-        box-shadow: 0 10px 24px rgba(201, 106, 66, 0.24);
+        border: 1px solid var(--line) !important;
     }
 
     .stButton button,
     .stDownloadButton button {
-        border-radius: 999px !important;
+        border-radius: 10px !important;
         min-height: 46px !important;
         font-weight: 700 !important;
-        transition: transform 180ms ease, box-shadow 180ms ease !important;
+        box-shadow: none !important;
+        border: 1px solid var(--line) !important;
+        color: #111827 !important;
+        background: #ffffff !important;
     }
 
-    .stButton button {
-        background: linear-gradient(135deg, var(--accent), var(--accent-dark)) !important;
-        color: white !important;
-        border: none !important;
-        box-shadow: 0 14px 30px rgba(201, 106, 66, 0.24);
+    .stButton button[kind="primary"],
+    .stDownloadButton button[kind="primary"],
+    .stFormSubmitButton button[kind="primary"],
+    button[data-testid="stBaseButton-primary"] {
+        background: var(--accent) !important;
+        border-color: var(--accent) !important;
+        color: #ffffff !important;
     }
 
-    .stButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 18px 34px rgba(201, 106, 66, 0.30) !important;
+    .stButton button[kind="primary"] *,
+    .stDownloadButton button[kind="primary"] *,
+    .stFormSubmitButton button[kind="primary"] *,
+    button[data-testid="stBaseButton-primary"] * {
+        color: #ffffff !important;
+        opacity: 1 !important;
+        -webkit-text-fill-color: #ffffff !important;
     }
 
-    .stDownloadButton button {
-        background: var(--surface-strong) !important;
-        color: var(--accent-dark) !important;
-        border: 1px solid rgba(201, 106, 66, 0.22) !important;
-        box-shadow: var(--shadow-soft);
+    .stButton button:hover,
+    .stDownloadButton button:hover,
+    .stFormSubmitButton button:hover {
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
     }
 
-    .stDownloadButton button:hover {
-        transform: translateY(-2px);
+    .stButton button[kind="primary"]:hover,
+    .stDownloadButton button[kind="primary"]:hover,
+    .stFormSubmitButton button[kind="primary"]:hover,
+    button[data-testid="stBaseButton-primary"]:hover {
+        background: #4338ca !important;
+        color: #ffffff !important;
+    }
+
+    .auth-page {
+        min-height: 82vh;
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(360px, 0.72fr);
+        gap: 48px;
+        align-items: center;
+        padding: 28px 0 48px;
+    }
+
+    .auth-copy-panel {
+        background:
+            radial-gradient(circle at 82% 16%, rgba(79,70,229,0.14), transparent 32%),
+            linear-gradient(135deg, #ffffff, #f6f4ff);
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        padding: 46px;
+        min-height: 480px;
+        box-shadow: var(--shadow);
+    }
+
+    .auth-copy-panel h1 {
+        font-size: 46px;
+        line-height: 1.15;
+        margin: 20px 0 18px;
+        color: #081033;
+    }
+
+    .auth-copy-panel p {
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.7;
+        max-width: 520px;
+    }
+
+    .auth-card {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 30px;
+        box-shadow: var(--shadow);
+    }
+
+    .auth-card h2 {
+        font-size: 28px;
+        margin: 0 0 8px;
+        color: #081033;
+    }
+
+    .auth-card .auth-muted {
+        color: var(--muted);
+        margin-bottom: 20px;
+        line-height: 1.55;
+    }
+
+    div[data-testid="stTextInputRootElement"] > div {
+        min-height: 48px !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--line) !important;
+        background: #ffffff !important;
+        box-shadow: 0 8px 18px rgba(17,24,39,0.04) !important;
+    }
+
+    div[data-testid="stTextInputRootElement"] input {
+        color: var(--ink) !important;
+        -webkit-text-fill-color: var(--ink) !important;
+    }
+
+    div[data-testid="stTextInputRootElement"]:focus-within > div {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 4px rgba(79,70,229,0.12) !important;
+    }
+
+    label,
+    div[data-testid="stMarkdownContainer"] p {
+        color: #344054 !important;
+    }
+
+    div[data-testid="stForm"] {
+        border: 0 !important;
+        background: transparent !important;
+        padding: 0 !important;
+    }
+
+    div[data-testid="stFormSubmitButton"] button {
+        background: var(--accent) !important;
+        border: 1px solid var(--accent) !important;
+        color: #ffffff !important;
+        min-height: 48px !important;
+        border-radius: 10px !important;
+        font-weight: 800 !important;
+    }
+
+    div[data-testid="stFormSubmitButton"] button * {
+        color: #ffffff !important;
+        opacity: 1 !important;
+        -webkit-text-fill-color: #ffffff !important;
+    }
+
+    div[data-testid="stFormSubmitButton"] button:hover {
+        background: #4338ca !important;
+        border-color: #4338ca !important;
+        color: #ffffff !important;
+    }
+
+    .auth-form-heading {
+        font-size: 30px;
+        line-height: 1.15;
+        color: #081033;
+        font-weight: 800;
+        margin: 0 0 8px;
+    }
+
+    .auth-form-copy {
+        color: var(--muted);
+        line-height: 1.55;
+        margin-bottom: 22px;
     }
 
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--line);
-        border-radius: 22px;
+        border-radius: 10px;
         overflow: hidden;
-        box-shadow: var(--shadow);
-        background: var(--surface-strong);
     }
 
-    div[data-testid="stAlert"] {
-        border-radius: 18px;
+    .upgrade-card,
+    .helper-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 18px;
+        margin-top: 24px;
+        background: #fff;
     }
 
-    div[data-testid="stToggle"] span,
-    div[data-testid="stToggle"] p,
-    div[data-testid="stSlider"] span,
-    div[data-testid="stSlider"] p {
-        color: var(--ink) !important;
-        opacity: 1 !important;
-    }
-
-    div[data-testid="stMarkdownContainer"] a {
-        color: var(--accent-dark);
-        text-decoration-thickness: 1px;
-    }
-
-    div[data-testid="stMarkdownContainer"] a:hover {
-        color: var(--accent);
-    }
-
-    .hero-wrap {
-        background:
-            linear-gradient(135deg, rgba(255,252,246,0.96), rgba(246,235,219,0.90)),
-            linear-gradient(120deg, rgba(201,106,66,0.04), rgba(93,140,122,0.03));
-        border: 1px solid rgba(71, 53, 35, 0.10);
-        border-radius: 28px;
-        padding: 26px 28px;
-        margin-bottom: 1rem;
-        box-shadow: var(--shadow);
-    }
-
-    .hero-kicker {
-        font-family: "IBM Plex Mono", monospace;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        font-size: 12px;
-        color: #2c655d;
-        margin-bottom: 10px;
-    }
-
-    .hero-title {
-        font-size: 56px;
-        line-height: 0.95;
-        font-weight: 700;
-        color: var(--ink);
-        margin: 0 0 14px 0;
-    }
-
-    .hero-copy {
-        color: var(--muted);
-        font-size: 17px;
-        max-width: 760px;
-    }
-
-    .hero-pills {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 18px;
-    }
-
-    .hero-pill {
-        background: var(--accent-soft);
-        color: var(--accent-dark);
-        border: 1px solid rgba(201, 106, 66, 0.12);
-        border-radius: 999px;
-        padding: 8px 12px;
-        font-size: 13px;
-        font-weight: 500;
-    }
-
-    .suggestion-url {
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.45;
-        margin: -6px 0 10px 18px;
-        word-break: break-all;
+    .upgrade-card {
+        background: #f7f5ff;
     }
 
     @media (max-width: 900px) {
-        .hero-title {
-            font-size: 38px;
+        .hero {
+            grid-template-columns: 1fr;
         }
-        .hero-copy {
-            font-size: 15px;
+        .hero h1 {
+            font-size: 42px;
+        }
+        .demo-card {
+            grid-template-columns: 1fr;
+        }
+        .arrow-bubble {
+            display: none;
+        }
+        .nav-links {
+            display: none;
+        }
+        .auth-page {
+            grid-template-columns: 1fr;
         }
     }
     </style>
@@ -302,217 +652,541 @@ st.markdown(
 )
 
 
-def _hero() -> None:
-    st.markdown(
-        """
-        <div class="hero-wrap">
-            <div class="hero-kicker">Pure Python Keyword Workspace</div>
-            <div class="hero-title">KeywordHub</div>
-            <div class="hero-copy">
-                Matndan kalit so'zlarni ajrating, muhim iboralarni toping va
-                Google, YouTube, Bing suggestion natijalarini bitta joyda ko'ring.
-            </div>
-            <div class="hero-pills">
-                <span class="hero-pill">TF-IDF va N-gram</span>
-                <span class="hero-pill">Live Suggestions</span>
-                <span class="hero-pill">TXT va CSV eksport</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+def init_state() -> None:
+    defaults = {
+        "is_authenticated": False,
+        "current_user": "",
+        "users": dict(DEMO_USERS),
+        "auth_view": "login",
+        "show_auth_page": False,
+        "page": "Asosiy sahifa",
+        "method": "TF-IDF",
+        "analysis_result": None,
+        "analysis_text": "",
+        "analysis_text_input": "",
+        "pending_analysis_text": None,
+        "analysis_history": [],
+        "documents": [],
+        "favorites": [],
+        "language": "UZ",
+    }
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
+
+
+def set_page(page: str) -> None:
+    st.session_state["page"] = page
+
+
+def login_user(username: str, password: str) -> bool:
+    users = st.session_state.get("users", {})
+    normalized = username.strip().lower()
+    if users.get(normalized) == password.strip():
+        st.session_state["is_authenticated"] = True
+        st.session_state["current_user"] = normalized
+        st.session_state["page"] = "Asosiy sahifa"
+        return True
+    return False
+
+
+def register_user(username: str, password: str, confirm: str) -> tuple[bool, str]:
+    normalized = username.strip().lower()
+    if len(normalized) < 3:
+        return False, "Login kamida 3 ta belgidan iborat bo'lsin."
+    if len(password) < 5:
+        return False, "Parol kamida 5 ta belgidan iborat bo'lsin."
+    if password != confirm:
+        return False, "Parollar mos emas."
+    if normalized in st.session_state["users"]:
+        return False, "Bu login allaqachon mavjud."
+    st.session_state["users"][normalized] = password
+    st.session_state["is_authenticated"] = True
+    st.session_state["current_user"] = normalized
+    st.session_state["page"] = "Asosiy sahifa"
+    return True, "Ro'yxatdan o'tildi."
+
+
+def result_items(result: AnalysisResult, section: str) -> list[KeywordItem]:
+    if section == "Kalit so'zlar":
+        return result.top_keywords
+    if section == "N-gramlar":
+        return result.top_ngrams
+    return result.top_phrases
+
+
+def items_frame(items: list[KeywordItem]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"№": index, "Natija": item.term, "Ball": item.score, "Manba": item.source}
+            for index, item in enumerate(items, start=1)
+        ]
     )
 
 
-def _load_text_input() -> str:
-    uploaded = st.file_uploader("Fayl yuklash", type=["txt", "md", "csv"])
-    text_value = st.text_area(
-        "Tahlil uchun matn",
-        height=280,
-        placeholder="Bu yerga matn yozing yoki fayl yuklang...",
-    )
-    if uploaded is not None:
-        try:
-            text_value = extract_text_from_file(uploaded.name, uploaded.getvalue())
-            st.success("Fayldagi matn muvaffaqiyatli o'qildi.")
-        except ValueError as exc:
-            st.error(str(exc))
-    return text_value
+def all_result_rows(result: AnalysisResult) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for label, items in [
+        ("keyword", result.top_keywords),
+        ("ngram", result.top_ngrams),
+        ("phrase", result.top_phrases),
+    ]:
+        rows.extend([[label, item.term, str(item.score), item.source] for item in items])
+    return rows
 
 
-def _render_metric_cards(result: AnalysisResult) -> None:
-    col1, col2, col3 = st.columns(3)
-    col1.metric("So'zlar soni", result.total_words)
-    col2.metric("Unikal so'zlar", result.unique_words)
-    col3.metric("Top kalitlar", len(result.top_keywords))
-
-
-def _render_keyword_table(title: str, items: list, key_prefix: str) -> None:
-    st.subheader(title)
-    if not items:
-        st.info("Hozircha natija topilmadi.")
-        return
-    frame = pd.DataFrame(
-        [{"Term": item.term, "Score": item.score, "Source": item.source} for item in items]
-    )
-    st.dataframe(frame, use_container_width=True, hide_index=True)
-    text_payload = keywords_to_text(title, items)
-    csv_payload = rows_to_csv_bytes(frame.columns.tolist(), frame.astype(str).values.tolist())
-    col1, col2 = st.columns(2)
-    col1.download_button(
-        "TXT yuklab olish",
-        data=text_payload.encode("utf-8"),
-        file_name=f"{key_prefix}.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-    col2.download_button(
-        "CSV yuklab olish",
-        data=csv_payload,
-        file_name=f"{key_prefix}.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
-
-
-def _render_analysis_mode() -> None:
-    st.subheader("Matn Tahlili")
-    st.caption("Matndan kalit so'zlar, n-gramlar va muhim iboralarni ajratish moduli.")
-    left, right = st.columns([1.4, 0.6], gap="large")
-    with left:
-        text = _load_text_input()
-    with right:
-        top_k = st.slider("Natijalar soni", min_value=5, max_value=40, value=20, step=5)
-        run_analysis = st.button("Matnni tahlil qilish", type="primary", use_container_width=True)
-    if not run_analysis:
-        return
-    if not text.strip():
-        st.warning("Tahlil qilish uchun matn kiriting.")
-        return
-    with st.spinner("Matn tahlil qilinmoqda..."):
-        result = analyze_text(text, top_k=top_k)
-    _render_metric_cards(result)
-    tabs = st.tabs(["Kalit so'zlar", "N-gramlar", "Muhim iboralar"])
-    with tabs[0]:
-        _render_keyword_table("Kalit so'zlar", result.top_keywords, "keywords")
-    with tabs[1]:
-        _render_keyword_table("N-gramlar", result.top_ngrams, "ngrams")
-    with tabs[2]:
-        _render_keyword_table("Muhim iboralar", result.top_phrases, "phrases")
-    combined_text = "\n\n".join(
+def result_text(result: AnalysisResult) -> str:
+    return "\n\n".join(
         [
             keywords_to_text("Kalit so'zlar", result.top_keywords),
             keywords_to_text("N-gramlar", result.top_ngrams),
             keywords_to_text("Muhim iboralar", result.top_phrases),
         ]
     )
-    combined_rows = [
-        ["keyword", item.term, str(item.score), item.source] for item in result.top_keywords
-    ] + [["ngram", item.term, str(item.score), item.source] for item in result.top_ngrams] + [
-        ["phrase", item.term, str(item.score), item.source] for item in result.top_phrases
+
+
+def analysis_limit(text: str) -> int:
+    words = [word for word in text.split() if word.strip()]
+    return max(20, min(len(set(words)) + 50, 1000))
+
+
+def render_landing() -> None:
+    st.markdown(
+        """
+        <div class="top-nav">
+            <div class="brand"><span class="brand-mark">KW</span><span>KeyWord <span style="color:#4f46e5">AI</span></span></div>
+            <div class="nav-links">
+                <a class="active" href="#home">Bosh sahifa</a>
+                <a href="#features">Xususiyatlar</a>
+                <a href="#steps">Qanday ishlaydi?</a>
+                <a href="#about">About</a>
+                <a href="#contact">Aloqa</a>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    _, login_col, reg_col = st.columns([0.73, 0.12, 0.15])
+    with login_col:
+        if st.button("Kirish", use_container_width=True):
+            st.session_state["auth_view"] = "login"
+            st.session_state["show_auth_page"] = True
+            st.rerun()
+    with reg_col:
+        if st.button("Ro'yxatdan o'tish", type="primary", use_container_width=True):
+            st.session_state["auth_view"] = "register"
+            st.session_state["show_auth_page"] = True
+            st.rerun()
+
+    st.markdown(
+        """
+        <div id="home" class="hero">
+          <div>
+            <div class="pill">AI yordamida kalit so'zlar</div>
+            <h1>Matndan kalit so'zlarni avtomatik <span>ajratib oling!</span></h1>
+            <p>Sun'iy intellekt yordamida matnlaringizdan eng muhim so'z va iboralarni aniqlang. Tez, aniq va oson.</p>
+          </div>
+          <div class="hero-demo">
+            <div class="demo-blob"></div>
+            <div class="demo-card">
+                <div class="demo-panel">
+                    <div class="demo-title">Matn</div>
+                    <div class="line" style="width:78%"></div>
+                    <div class="line" style="width:68%"></div>
+                    <div class="line" style="width:76%"></div>
+                    <div class="line" style="width:90%"></div>
+                    <div class="line" style="width:70%"></div>
+                    <div class="line" style="width:84%"></div>
+                    <div class="line" style="width:64%"></div>
+                    <div class="line" style="width:78%"></div>
+                </div>
+                <div class="demo-panel">
+                    <div class="demo-title">Kalit so'zlar</div>
+                    <div class="chip-grid">
+                        <div class="demo-chip">sun'iy intellekt</div>
+                        <div class="demo-chip">kalit so'z</div>
+                        <div class="demo-chip">matn</div>
+                        <div class="demo-chip">texnologiya</div>
+                        <div class="demo-chip">avtomatik</div>
+                        <div class="demo-chip">ajratish</div>
+                        <div class="demo-chip">tizim</div>
+                        <div class="demo-chip">analiz</div>
+                    </div>
+                </div>
+                <div class="arrow-bubble">›</div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1, c2, _ = st.columns([0.18, 0.22, 0.60])
+    with c1:
+        if st.button("Boshlash", type="primary", use_container_width=True):
+            st.session_state["auth_view"] = "login"
+            st.session_state["show_auth_page"] = True
+            st.rerun()
+    with c2:
+        if st.button("Ko'proq ma'lumot", use_container_width=True):
+            st.info("Tizim matn yoki fayldan kalit so'zlar, n-gramlar va muhim iboralarni chiqaradi.")
+
+    st.markdown('<div id="steps" class="section-band"><div class="pill" style="margin:auto;display:flex;width:max-content">Qanday ishlaydi?</div><div class="section-title">Juda oddiy 3 qadam</div>', unsafe_allow_html=True)
+    s1, s2, s3 = st.columns(3, gap="large")
+    steps = [
+        ("1", "Matn kiriting", "Tahlil qilish uchun matningizni kiriting yoki joylang."),
+        ("2", "Tahlil qilinadi", "AI algoritm matnni tahlil qilib, muhim so'zlarni aniqlaydi."),
+        ("3", "Kalit so'zlar tayyor!", "Eng muhim kalit so'z va iboralarni natija sifatida oling."),
     ]
-    st.subheader("Barchasi Bir Joyda")
-    st.text_area("Nusxalash uchun tayyor matn", value=combined_text, height=220)
-    col1, col2 = st.columns(2)
-    col1.download_button(
-        "Barchasini TXT yuklab olish",
-        data=combined_text.encode("utf-8"),
-        file_name="analysis_all.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-    col2.download_button(
-        "Barchasini CSV yuklab olish",
-        data=rows_to_csv_bytes(["Type", "Term", "Score", "Source"], combined_rows),
-        file_name="analysis_all.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
-
-
-def _render_panel(panel: SuggestionPanel) -> None:
-    with st.container(border=True):
-        st.markdown(f"### {panel.source}")
-        if panel.error:
-            st.warning(panel.error)
-            return
-        if not panel.suggestions:
-            st.info("Taklif topilmadi.")
-            return
-        for item in panel.suggestions:
-            st.markdown(f"- [{item.text}]({item.url})")
-            st.markdown(
-                f'<div class="suggestion-url">{item.url}</div>',
-                unsafe_allow_html=True,
-            )
-
-
-def _render_suggestion_mode() -> None:
-    st.subheader("Qidiruv Takliflari")
-    st.caption("Google, YouTube va Bing dan suggestion natijalarini olish.")
-    col1, col2 = st.columns([1.2, 0.8], gap="large")
-    with col1:
-        query = st.text_input("Qidiruv so'zi", placeholder="Masalan: sun'iy intellekt")
-    with col2:
-        auto_fetch = st.toggle("Yozish bilan jonli yangilash", value=True)
-        manual_fetch = st.button("Takliflarni olish", type="primary", use_container_width=True)
-    should_run = query.strip() and (auto_fetch or manual_fetch)
-    if not should_run:
-        st.info("So'zni yozing va natijalar shu yerda ko'rinadi.")
-        return
-    with st.spinner("Takliflar olinmoqda..."):
-        panels = _run_async(fetch_suggestions(query.strip()))
-    cols = st.columns(3)
-    for col, panel in zip(cols, panels):
+    for col, (icon, title, copy) in zip([s1, s2, s3], steps):
         with col:
-            _render_panel(panel)
-
-    all_rows = [[panel.source, item.text, item.url] for panel in panels for item in panel.suggestions]
-    st.subheader("Eksport")
-    col1, col2 = st.columns(2)
-    col1.download_button(
-        "TXT yuklab olish",
-        data=suggestions_to_text(panels).encode("utf-8"),
-        file_name="suggestions.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-    col2.download_button(
-        "CSV yuklab olish",
-        data=rows_to_csv_bytes(["Source", "Suggestion", "URL"], all_rows),
-        file_name="suggestions.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
-    st.text_area(
-        "Nusxalash uchun tayyor ro'yxat",
-        value=suggestions_to_text(panels),
-        height=220,
-    )
+            st.markdown(f'<div class="step-card"><div class="step-icon">{icon}</div><h3>{title}</h3><p>{copy}</p></div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
-def _run_async(coro):
-    try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+def render_auth() -> None:
+    if not st.session_state.get("show_auth_page", False):
+        render_landing()
+        return
+
+    st.markdown('<div class="brand"><span class="brand-mark">KW</span><span>KeyWord <span style="color:#4f46e5">AI</span></span></div>', unsafe_allow_html=True)
+    copy_col, form_col = st.columns([0.58, 0.42], gap="large")
+    with copy_col:
+        st.markdown(
+            """
+            <div class="auth-copy-panel">
+              <div class="pill">Xavfsiz demo kirish</div>
+              <h1>Matn tahlili paneliga xush kelibsiz</h1>
+              <p>KeyWord AI matn va hujjatlardan kalit so'zlar, n-gramlar va muhim iboralarni tezda ajratadi. Demo uchun <b>admin / 12345</b> yoki <b>demo / demo123</b> ishlaydi.</p>
+              <div class="demo-card" style="width:100%;margin-top:28px;padding:18px;grid-template-columns:1fr 1fr;box-shadow:none">
+                <div class="demo-panel" style="min-height:160px">
+                  <div class="demo-title">Matn</div>
+                  <div class="line" style="width:88%"></div>
+                  <div class="line" style="width:72%"></div>
+                  <div class="line" style="width:80%"></div>
+                </div>
+                <div class="demo-panel" style="min-height:160px">
+                  <div class="demo-title">Natija</div>
+                  <div class="chip-grid">
+                    <div class="demo-chip">kalit so'z</div>
+                    <div class="demo-chip">analiz</div>
+                    <div class="demo-chip">matn</div>
+                    <div class="demo-chip">AI</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with form_col:
+        with st.container(border=True):
+            if st.session_state["auth_view"] == "login":
+                st.markdown(
+                    "<div class='auth-form-heading'>Kirish</div><div class='auth-form-copy'>Akkauntingizga kiring yoki demo login bilan davom eting.</div>",
+                    unsafe_allow_html=True,
+                )
+                with st.form("login_form"):
+                    username = st.text_input("Login", value="admin")
+                    password = st.text_input("Parol", type="password", value="12345")
+                    submitted = st.form_submit_button("Kirish", type="primary", use_container_width=True)
+                if submitted:
+                    if login_user(username, password):
+                        st.rerun()
+                    st.error("Login yoki parol noto'g'ri.")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Ro'yxatdan o'tish", use_container_width=True):
+                        st.session_state["auth_view"] = "register"
+                        st.rerun()
+                with c2:
+                    if st.button("Bosh sahifa", use_container_width=True):
+                        st.session_state["show_auth_page"] = False
+                        st.rerun()
+            else:
+                st.markdown(
+                    "<div class='auth-form-heading'>Ro'yxatdan o'tish</div><div class='auth-form-copy'>Yangi lokal demo akkaunt yarating.</div>",
+                    unsafe_allow_html=True,
+                )
+                with st.form("register_form"):
+                    username = st.text_input("Yangi login")
+                    password = st.text_input("Parol", type="password")
+                    confirm = st.text_input("Parolni tasdiqlang", type="password")
+                    submitted = st.form_submit_button("Ro'yxatdan o'tish", type="primary", use_container_width=True)
+                if submitted:
+                    ok, message = register_user(username, password, confirm)
+                    if ok:
+                        st.rerun()
+                    st.error(message)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Kirishga qaytish", use_container_width=True):
+                        st.session_state["auth_view"] = "login"
+                        st.rerun()
+                with c2:
+                    if st.button("Bosh sahifa", use_container_width=True):
+                        st.session_state["show_auth_page"] = False
+                        st.rerun()
+
+
+def render_sidebar() -> None:
+    with st.sidebar:
+        st.markdown('<div class="brand"><span class="brand-mark">KW</span><span>KeyWord <span style="color:#4f46e5">AI</span></span></div>', unsafe_allow_html=True)
+        nav = [
+            ("Asosiy sahifa", "⌂"),
+            ("Tarix", "○"),
+            ("Hujjatlarim", "□"),
+            ("Sevimlilar", "☆"),
+            ("Yordam", "?"),
+        ]
+        for page, icon in nav:
+            if st.button(f"{icon}  {page}", key=f"nav_{page}", use_container_width=True):
+                set_page(page)
+                st.rerun()
+        st.markdown(
+            """
+            <div class="upgrade-card">
+                <b>Pro versiyaga o'ting</b>
+                <p style="color:#667085;line-height:1.6">Cheksiz matn, ko'proq funksiyalar va ustuvor qo'llab-quvvatlash.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Pro versiyani ochish", type="primary", use_container_width=True):
+            st.info("Pro versiya demo loyihada maket sifatida ko'rsatilgan.")
+        st.markdown(
+            """
+            <div class="helper-card">
+                <b>AI yordamchisi</b>
+                <p style="color:#667085;line-height:1.6">Savollaringiz bo'lsa, yordam bo'limiga o'ting.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Yordam olish", use_container_width=True):
+            set_page("Yordam")
+            st.rerun()
+
+
+def render_topbar() -> None:
+    _, lang_col, account_col = st.columns([0.78, 0.08, 0.14], gap="small")
+    with lang_col:
+        st.selectbox("Til", ["UZ", "RU", "EN"], key="language", label_visibility="collapsed")
+    with account_col:
+        choice = st.selectbox(
+            "Akkaunt",
+            ["account", "logout"],
+            format_func=lambda value: f"A  {st.session_state['current_user'].title()}" if value == "account" else "Chiqish",
+            label_visibility="collapsed",
+        )
+    if choice == "logout":
+        st.session_state["is_authenticated"] = False
+        st.session_state["current_user"] = ""
+        st.session_state["auth_view"] = "login"
+        st.session_state["show_auth_page"] = False
+        st.rerun()
+
+
+def render_home() -> None:
+    if st.session_state.get("pending_analysis_text") is not None:
+        st.session_state["analysis_text"] = st.session_state["pending_analysis_text"]
+        st.session_state["analysis_text_input"] = st.session_state["pending_analysis_text"]
+        st.session_state["pending_analysis_text"] = None
+
+    st.markdown('<div class="page-title">Asosiy sahifa</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">Matn kiriting yoki fayl yuklab, eng muhim kalit so\'zlarni oling.</div>', unsafe_allow_html=True)
+    col_left, col_right = st.columns([0.42, 0.58], gap="large")
+    with col_left:
+        st.markdown("#### 1. Matn tahlili usulini tanlang")
+        st.session_state["method"] = st.radio(
+            "Tahlil usuli",
+            list(METHODS.keys()),
+            captions=[METHODS[name][1] for name in METHODS],
+            key="method_radio",
+            label_visibility="collapsed",
+        )
+        compare = st.checkbox("Uslubni solishtirish")
+    with col_right:
+        top_title, clear_col = st.columns([0.75, 0.25])
+        with top_title:
+            st.markdown("#### 2. Matn kiriting yoki fayl yuklang")
+        with clear_col:
+            if st.button("Tozalash", use_container_width=True):
+                st.session_state["analysis_text"] = ""
+                st.session_state["analysis_text_input"] = ""
+                st.session_state["analysis_result"] = None
+                st.rerun()
+        text = st.text_area("Matn kiritish", key="analysis_text_input", height=250, placeholder="Matningizni bu yerga kiriting...")
+        st.session_state["analysis_text"] = text
+        c1, c2 = st.columns([0.52, 0.48])
+        with c1:
+            if st.button("Namuna matn yuklash", use_container_width=True):
+                st.session_state["pending_analysis_text"] = SAMPLE_TEXT
+                st.rerun()
+        with c2:
+            uploaded = st.file_uploader("Fayl yuklash", type=["txt", "md", "csv", "docx"])
+        if uploaded is not None:
+            try:
+                text = extract_text_from_file(uploaded.name, uploaded.getvalue())
+                st.session_state["pending_analysis_text"] = text
+                docs = st.session_state["documents"]
+                if uploaded.name not in [doc["Hujjat nomi"] for doc in docs]:
+                    docs.insert(
+                        0,
+                        {
+                            "Hujjat nomi": uploaded.name,
+                            "Turi": Path(uploaded.name).suffix.upper().lstrip("."),
+                            "Hajmi": f"{len(uploaded.getvalue()) / 1024:.1f} KB",
+                            "Yuklangan sana": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                        },
+                    )
+                st.success("Fayldagi matn o'qildi.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+
+    _, run_col, _ = st.columns([0.25, 0.5, 0.25])
+    with run_col:
+        run = st.button("Kalit so'zlarni topish", type="primary", use_container_width=True)
+    if run:
+        source_text = st.session_state.get("analysis_text", "")
+        if not source_text.strip():
+            st.warning("Tahlil qilish uchun matn kiriting yoki fayl yuklang.")
+        else:
+            with st.spinner("Matn tahlil qilinmoqda..."):
+                result = analyze_text(source_text, top_k=analysis_limit(source_text))
+            st.session_state["analysis_result"] = result
+            st.session_state["analysis_history"].insert(
+                0,
+                {
+                    "Matn sarlavhasi": source_text[:42] + ("..." if len(source_text) > 42 else ""),
+                    "Usul": "Solishtirish" if compare else st.session_state["method"],
+                    "Kalit so'zlar soni": f"{len(result.top_keywords)} ta",
+                    "Sana": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                },
+            )
+            st.success("Tahlil tayyor.")
+
+    if st.session_state.get("analysis_result") is not None:
+        render_results(st.session_state["analysis_result"])
+    else:
+        render_recent()
+
+
+def render_results(result: AnalysisResult) -> None:
+    st.markdown("### Tahlil natijalari")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("So'zlar soni", result.total_words)
+    m2.metric("Unikal so'zlar", result.unique_words)
+    m3.metric("Top kalitlar", len(result.top_keywords))
+
+    section = st.selectbox("Natijani ko'rish bo'limi", ["Kalit so'zlar", "N-gramlar", "Muhim iboralar"])
+    items = result_items(result, section)
+    frame = items_frame(items)
+    st.dataframe(frame, use_container_width=True, hide_index=True)
+
+    text_payload = keywords_to_text(section, items)
+    csv_payload = rows_to_csv_bytes(frame.columns.tolist(), frame.astype(str).values.tolist())
+    d1, d2, d3 = st.columns(3)
+    d1.download_button("TXT yuklab olish", data=text_payload.encode("utf-8"), file_name=f"{section}.txt", mime="text/plain", use_container_width=True)
+    d2.download_button("CSV yuklab olish", data=csv_payload, file_name=f"{section}.csv", mime="text/csv", use_container_width=True)
+    if d3.button("Sevimlilarga qo'shish", use_container_width=True):
+        if frame.empty:
+            st.warning("Sevimlilarga qo'shish uchun natija yo'q.")
+        else:
+            st.session_state["favorites"] = frame.head(10).to_dict("records")
+            st.success("Natija sevimlilarga qo'shildi.")
+
+    with st.expander("Barcha natijalar"):
+        st.text_area("Nusxalash uchun tayyor matn", value=result_text(result), height=180)
+        rows = all_result_rows(result)
+        c1, c2 = st.columns(2)
+        c1.download_button("Barchasini TXT yuklab olish", data=result_text(result).encode("utf-8"), file_name="analysis_all.txt", mime="text/plain", use_container_width=True)
+        c2.download_button("Barchasini CSV yuklab olish", data=rows_to_csv_bytes(["Type", "Term", "Score", "Source"], rows), file_name="analysis_all.csv", mime="text/csv", use_container_width=True)
+
+
+def render_recent() -> None:
+    st.divider()
+    st.markdown("### So'nggi tahlillar")
+    history = st.session_state["analysis_history"]
+    if not history:
+        history = [
+            {"Matn sarlavhasi": "Sun'iy intellekt haqida", "Usul": "TF-IDF", "Kalit so'zlar soni": "12 ta", "Sana": "24.05.2024 15:30"},
+            {"Matn sarlavhasi": "Ekologiya va atrof-muhit", "Usul": "TF-IDF", "Kalit so'zlar soni": "10 ta", "Sana": "23.05.2024 10:12"},
+            {"Matn sarlavhasi": "Raqamli marketing strategiyalari", "Usul": "TextRank", "Kalit so'zlar soni": "8 ta", "Sana": "22.05.2024 09:45"},
+            {"Matn sarlavhasi": "Blockchain texnologiyasi", "Usul": "N-gram", "Kalit so'zlar soni": "15 ta", "Sana": "21.05.2024 18:20"},
+        ]
+    top, btn = st.columns([0.82, 0.18])
+    with btn:
+        if st.button("Barchasini ko'rish", use_container_width=True):
+            set_page("Tarix")
+            st.rerun()
+    st.dataframe(pd.DataFrame(history[:6]), use_container_width=True, hide_index=True)
+
+
+def render_history() -> None:
+    st.markdown('<div class="page-title">Tarix</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">Avval tahlil qilingan matnlar tarixi.</div>', unsafe_allow_html=True)
+    render_recent()
+
+
+def render_documents() -> None:
+    st.markdown('<div class="page-title">Hujjatlarim</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">Yuklangan hujjatlaringiz ro\'yxati.</div>', unsafe_allow_html=True)
+    if st.button("Yangi hujjat yuklash", type="primary"):
+        set_page("Asosiy sahifa")
+        st.rerun()
+    docs = st.session_state["documents"] or [
+        {"Hujjat nomi": "suniy_intellekt.docx", "Turi": "DOCX", "Hajmi": "24.5 KB", "Yuklangan sana": "24.05.2024 15:28"},
+        {"Hujjat nomi": "ekologiya.txt", "Turi": "TXT", "Hajmi": "8.2 KB", "Yuklangan sana": "23.05.2024 10:10"},
+    ]
+    st.dataframe(pd.DataFrame(docs), use_container_width=True, hide_index=True)
+
+
+def render_favorites() -> None:
+    st.markdown('<div class="page-title">Sevimlilar</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">Sevimlilarga qo\'shilgan natijalar.</div>', unsafe_allow_html=True)
+    favorites = st.session_state["favorites"]
+    if favorites:
+        st.dataframe(pd.DataFrame(favorites), use_container_width=True, hide_index=True)
+    else:
+        st.info("Hozircha sevimli natija yo'q.")
+
+
+def render_help() -> None:
+    st.markdown('<div class="page-title">Yordam</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">Ko\'p beriladigan savollar va foydali ma\'lumotlar.</div>', unsafe_allow_html=True)
+    questions = {
+        "Hisob qanday yaratiladi?": "Ro'yxatdan o'tish oynasida login va parol kiriting. Demo uchun admin / 12345 ishlaydi.",
+        "Matn qanday tahlil qilinadi?": "Asosiy sahifada matn kiriting yoki fayl yuklang va Kalit so'zlarni topish tugmasini bosing.",
+        "Natijani qanday saqlayman?": "Natijalar bo'limida TXT yoki CSV yuklab olish tugmalaridan foydalaning.",
+        "Qaysi fayllar qo'llab-quvvatlanadi?": "TXT, MD, CSV va DOCX fayllar qo'llab-quvvatlanadi.",
+    }
+    for question, answer in questions.items():
+        with st.expander(question):
+            st.write(answer)
+
+
+def render_dashboard() -> None:
+    render_sidebar()
+    render_topbar()
+    page = st.session_state["page"]
+    if page == "Asosiy sahifa":
+        render_home()
+    elif page == "Tarix":
+        render_history()
+    elif page == "Hujjatlarim":
+        render_documents()
+    elif page == "Sevimlilar":
+        render_favorites()
+    else:
+        render_help()
 
 
 def main() -> None:
-    _hero()
-    st.sidebar.title("KeywordHub")
-    st.sidebar.caption("Kalit so'z tahlili va live suggestion platformasi.")
-    mode = st.sidebar.radio(
-        "Bo'limni tanlang",
-        ["Matn tahlili", "Qidiruv takliflari"],
-    )
-    if mode == "Matn tahlili":
-        _render_analysis_mode()
+    init_state()
+    if st.session_state["is_authenticated"]:
+        render_dashboard()
     else:
-        _render_suggestion_mode()
+        render_auth()
 
 
 if __name__ == "__main__":
