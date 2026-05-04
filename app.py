@@ -744,6 +744,11 @@ def result_text(result: AnalysisResult) -> str:
     )
 
 
+def keyword_summary(result: AnalysisResult, limit: int = 12) -> str:
+    terms = [item.term for item in result.top_keywords[:limit]]
+    return ", ".join(terms) if terms else "Topilmadi"
+
+
 def analysis_limit(text: str) -> int:
     words = [word for word in text.split() if word.strip()]
     return max(20, min(len(set(words)) + 50, 1000))
@@ -1059,7 +1064,7 @@ def render_home() -> None:
                 {
                     "Matn sarlavhasi": source_text[:42] + ("..." if len(source_text) > 42 else ""),
                     "Usul": "Solishtirish" if compare else st.session_state["method"],
-                    "Kalit so'zlar soni": f"{len(result.top_keywords)} ta",
+                    "Kalit so'zlar": keyword_summary(result),
                     "Sana": datetime.now().strftime("%d.%m.%Y %H:%M"),
                 },
             )
@@ -1078,54 +1083,72 @@ def render_results(result: AnalysisResult) -> None:
     m2.metric("Unikal so'zlar", result.unique_words)
     m3.metric("Top kalitlar", len(result.top_keywords))
 
-    section = st.selectbox("Natijani ko'rish bo'limi", ["Kalit so'zlar", "N-gramlar", "Muhim iboralar"])
-    items = result_items(result, section)
-    frame = items_frame(items)
-    st.dataframe(frame, use_container_width=True, hide_index=True)
-
-    text_payload = keywords_to_text(section, items)
-    csv_payload = rows_to_csv_bytes(frame.columns.tolist(), frame.astype(str).values.tolist())
-    d1, d2, d3 = st.columns(3)
-    d1.download_button("TXT yuklab olish", data=text_payload.encode("utf-8"), file_name=f"{section}.txt", mime="text/plain", use_container_width=True)
-    d2.download_button("CSV yuklab olish", data=csv_payload, file_name=f"{section}.csv", mime="text/csv", use_container_width=True)
-    if d3.button("Sevimlilarga qo'shish", use_container_width=True):
+    sections = [
+        ("Kalit so'zlar", result.top_keywords),
+        ("N-gramlar", result.top_ngrams),
+        ("Muhim iboralar", result.top_phrases),
+    ]
+    for title, items in sections:
+        st.markdown(f"#### {title}")
+        frame = items_frame(items)
         if frame.empty:
+            st.info(f"{title} topilmadi.")
+        else:
+            st.table(frame.set_index("№"))
+        d1, d2 = st.columns(2)
+        d1.download_button(
+            f"{title} TXT yuklab olish",
+            data=keywords_to_text(title, items).encode("utf-8"),
+            file_name=f"{title}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+        d2.download_button(
+            f"{title} CSV yuklab olish",
+            data=rows_to_csv_bytes(frame.columns.tolist(), frame.astype(str).values.tolist()),
+            file_name=f"{title}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    st.markdown("#### Barcha natijalar")
+    st.text_area("Nusxalash uchun tayyor matn", value=result_text(result), height=180)
+    rows = all_result_rows(result)
+    c1, c2, c3 = st.columns(3)
+    c1.download_button("Barchasini TXT yuklab olish", data=result_text(result).encode("utf-8"), file_name="analysis_all.txt", mime="text/plain", use_container_width=True)
+    c2.download_button("Barchasini CSV yuklab olish", data=rows_to_csv_bytes(["Type", "Term", "Score", "Source"], rows), file_name="analysis_all.csv", mime="text/csv", use_container_width=True)
+    if c3.button("Sevimlilarga qo'shish", use_container_width=True):
+        if not result.top_keywords:
             st.warning("Sevimlilarga qo'shish uchun natija yo'q.")
         else:
-            st.session_state["favorites"] = frame.head(10).to_dict("records")
+            st.session_state["favorites"] = items_frame(result.top_keywords).head(10).to_dict("records")
             st.success("Natija sevimlilarga qo'shildi.")
 
-    with st.expander("Barcha natijalar"):
-        st.text_area("Nusxalash uchun tayyor matn", value=result_text(result), height=180)
-        rows = all_result_rows(result)
-        c1, c2 = st.columns(2)
-        c1.download_button("Barchasini TXT yuklab olish", data=result_text(result).encode("utf-8"), file_name="analysis_all.txt", mime="text/plain", use_container_width=True)
-        c2.download_button("Barchasini CSV yuklab olish", data=rows_to_csv_bytes(["Type", "Term", "Score", "Source"], rows), file_name="analysis_all.csv", mime="text/csv", use_container_width=True)
 
-
-def render_recent() -> None:
+def render_recent(show_button: bool = True) -> None:
     st.divider()
     st.markdown("### So'nggi tahlillar")
     history = st.session_state["analysis_history"]
     if not history:
         history = [
-            {"Matn sarlavhasi": "Sun'iy intellekt haqida", "Usul": "TF-IDF", "Kalit so'zlar soni": "12 ta", "Sana": "24.05.2024 15:30"},
-            {"Matn sarlavhasi": "Ekologiya va atrof-muhit", "Usul": "TF-IDF", "Kalit so'zlar soni": "10 ta", "Sana": "23.05.2024 10:12"},
-            {"Matn sarlavhasi": "Raqamli marketing strategiyalari", "Usul": "TextRank", "Kalit so'zlar soni": "8 ta", "Sana": "22.05.2024 09:45"},
-            {"Matn sarlavhasi": "Blockchain texnologiyasi", "Usul": "N-gram", "Kalit so'zlar soni": "15 ta", "Sana": "21.05.2024 18:20"},
+            {"Matn sarlavhasi": "Sun'iy intellekt haqida", "Usul": "TF-IDF", "Kalit so'zlar": "sun'iy, intellekt, texnologiya, ma'lumotlar", "Sana": "24.05.2024 15:30"},
+            {"Matn sarlavhasi": "Ekologiya va atrof-muhit", "Usul": "TF-IDF", "Kalit so'zlar": "ekologiya, atrof-muhit, tabiat, himoya", "Sana": "23.05.2024 10:12"},
+            {"Matn sarlavhasi": "Raqamli marketing strategiyalari", "Usul": "TextRank", "Kalit so'zlar": "marketing, strategiya, raqamli, reklama", "Sana": "22.05.2024 09:45"},
+            {"Matn sarlavhasi": "Blockchain texnologiyasi", "Usul": "N-gram", "Kalit so'zlar": "blockchain, texnologiya, tarmoq, xavfsizlik", "Sana": "21.05.2024 18:20"},
         ]
-    top, btn = st.columns([0.82, 0.18])
-    with btn:
-        if st.button("Barchasini ko'rish", use_container_width=True):
-            set_page("Tarix")
-            st.rerun()
-    st.dataframe(pd.DataFrame(history[:6]), use_container_width=True, hide_index=True)
+    if show_button:
+        top, btn = st.columns([0.82, 0.18])
+        with btn:
+            if st.button("Barchasini ko'rish", key="recent_show_all", use_container_width=True):
+                set_page("Tarix")
+                st.rerun()
+    st.table(pd.DataFrame(history[:6]))
 
 
 def render_history() -> None:
     st.markdown('<div class="page-title">Tarix</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">Avval tahlil qilingan matnlar tarixi.</div>', unsafe_allow_html=True)
-    render_recent()
+    render_recent(show_button=False)
 
 
 def render_documents() -> None:
