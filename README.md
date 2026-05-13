@@ -21,6 +21,18 @@ Loyiha “Matnlardan kalit so'zlarni avtomatik ajratish” mavzusini amaliy ko'r
 - Sevimlilarga natija qo'shish
 - O'zbek, rus va ingliz stopword/tokenlash qo'llab-quvvatlovi
 
+## Qo'shimcha So'zlarni Filtrlash
+
+Tizim matndan kalit so'zlarni ajratishda quyidagi qo'shimcha/auxilary so'zlarni avtomatik ravishda chiqarib tashlaydi:
+
+- **Haqida**: "haqida", "haqidagi" - matn yoki mavzu haqida
+- **O'lcham**: "kichik", "katta", "uzoq", "qisqa" - hajm va o'lcham xususiyatlari
+- **Yo'nalish**: "tomonidan", "tomoni", "beri", "orta", "yuqori", "pastki" - joylashuv xususiyatlari
+- **Savollar**: "savol", "savolli", "savollash" - so'roq xususiyatlari
+- **Boshqa**: "kabi", "misol", "oddiy", "murakkab", "xusus", "umumiy" - taqqoslash va umumiy xususiyatlar
+
+Bu filtrlash natijalarning sifatini yaxshilaydi va faqat haqiqiy muhim kalit so'zlarni ta'kidlaydi.
+
 ## Demo Login
 
 ```text
@@ -96,6 +108,8 @@ http://localhost:8501
 - Natijalar HTML sifatida emas, oddiy Streamlit jadvalida chiqadi.
 - Tahlil natijasi 20 ta bilan cheklanmaydi; matndagi topilgan kalit so'zlar imkon qadar to'liq ko'rsatiladi.
 - Demo login production xavfsizligi uchun emas, faqat test va taqdimot uchun.
+- **Qo'shimcha Filtrlash**: Tizim qizil bilan ko'rsatilgan qo'shimcha so'zlarni (haqida, uzoq, tomonidan, kichik, beri, savol va shunga o'xshashlarni) avtomatik ravishda natijalardan chiqarib tashlaydi. Bu kalit so'zlarning sifatini oshiradi va faqat o'ziga xos muhim so'zlarni chiqaradi.
+- **Automatik Kompensatsiya**: Filtrlashdan keyin natijalar 20 tadan kam bo'lsa, tizim qo'shimcha nomzodlarni tahlil qiladi va sifatli natijalarni to'ldiradi.
 
 ## License
 

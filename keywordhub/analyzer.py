@@ -247,6 +247,50 @@ MODIFIER_LIKE_SUFFIXES = (
     "chan",
 )
 
+SUPPLEMENTARY_WORDS = {
+    # About, regarding
+    "haqida",
+    "haqidagi",
+    "haqdagi",
+    # Size/quality descriptors
+    "kichik",
+    "katta",
+    "uzoq",
+    "qisqa",
+    "yangi",
+    "eski",
+    "yaxshi",
+    "yomon",
+    # Directional/positional
+    "tomonidan",
+    "tomoni",
+    "tomonida",
+    "beri",
+    "orta",
+    "o'rta",
+    "yuqori",
+    "pastki",
+    "chap",
+    "o'ng",
+    # Question-related
+    "savol",
+    "savolli",
+    "savollash",
+    # Other supplementary
+    "kabi",
+    "misol",
+    "misoli",
+    "sherchasi",
+    "oʻrniga",
+    "orniga",
+    # More supplementary descriptors
+    "soddalashtira",
+    "murakkab",
+    "oddiy",
+    "xusus",
+    "umumiy",
+}
+
 def _normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text)
     normalized = SPACE_RE.sub(" ", normalized)
@@ -302,6 +346,37 @@ def _looks_verb_like(token: str) -> bool:
 
 def _looks_modifier_like(token: str) -> bool:
     return any(token.endswith(suffix) for suffix in MODIFIER_LIKE_SUFFIXES)
+
+
+def _is_supplementary_keyword(term: str) -> bool:
+    """Check if a keyword contains supplementary/auxiliary words that should be filtered."""
+    parts = term.lower().split()
+    for part in parts:
+        normalized_part = _normalize_token(part)
+        
+        # Check for exact matches
+        if normalized_part in SUPPLEMENTARY_WORDS:
+            return True
+        
+        # Check if normalized part starts with any supplementary word
+        # This handles variants like "haqida" -> "haqidagi", "haqidasi", etc.
+        for supp_word in SUPPLEMENTARY_WORDS:
+            if normalized_part.startswith(supp_word) and len(normalized_part) > len(supp_word):
+                # Only filter if it seems like an actual variant (has suffix)
+                suffix = normalized_part[len(supp_word):]
+                # Common Uzbek suffixes that create variants
+                if suffix in {'gi', 'si', 'ni', 'da', 'ga', 'dan', 'adan', 'nan', 'tan', 'ing', 'ngiz', 'ning', 'ringiz',
+                               'lari', 'lash', 'lar', 'lik', 'li', 'lig', 'siz', 'dir', 'roq', 'dilar', 'xona', 'xonada', 
+                               'mi', 'yotgan', 'yay', 'iyor', 'il', 'ili', 'ini', 'lar', 'sing', 'singiz', 'ka', 'qa', 
+                               'chi', 'chiga', 'chilar', 'chisi', 'likcha', 'likchi', 'sizning', 'miz', 'nning'}:
+                    return True
+    
+    return False
+
+
+def _filter_keywords(items: list[KeywordItem]) -> list[KeywordItem]:
+    """Filter out keywords containing supplementary words."""
+    return [item for item in items if not _is_supplementary_keyword(item.term)]
 
 
 def _phrase_naturalness(parts: list[str], first_index: int, total_tokens: int, count: int) -> float:
@@ -626,11 +701,38 @@ def analyze_text(text: str, top_k: int = 20) -> AnalysisResult:
     )
     supported_keywords = _build_supported_keywords(tokens, ngrams, phrases, top_k)
     merged_keywords = merge_keywords(freq_keywords, tfidf_keywords, supported_keywords, top_k=top_k)
+    
+    # Filter out supplementary keywords
+    filtered_keywords = _filter_keywords(merged_keywords)
+    filtered_ngrams = _filter_keywords(ngrams)
+    filtered_phrases = _filter_keywords(phrases)
+    
+    # Ensure we still have enough results by taking more and then filtering
+    if len(filtered_keywords) < top_k:
+        freq_keywords_extra = _build_frequency_keywords(tokens, top_k * 2)
+        tfidf_keywords_extra = _build_tfidf_keywords(cleaned_text, top_k * 2)
+        supported_keywords_extra = _build_supported_keywords(tokens, ngrams, phrases, top_k * 2)
+        merged_keywords_extra = merge_keywords(freq_keywords_extra, tfidf_keywords_extra, supported_keywords_extra, top_k=top_k * 2)
+        filtered_keywords = _filter_keywords(merged_keywords_extra)[:top_k]
+    
+    if len(filtered_ngrams) < top_k:
+        ngrams_extra = _build_ngram_keywords(cleaned_text, top_k * 2)
+        filtered_ngrams = _filter_keywords(ngrams_extra)[:top_k]
+    
+    if len(filtered_phrases) < top_k:
+        phrases_extra = merge_keywords(
+            _build_rake_phrases(cleaned_text, top_k * 2),
+            _build_keybert_phrases(cleaned_text, top_k * 2),
+            _build_simple_phrases(cleaned_text, top_k * 2),
+            top_k=top_k * 2,
+        )
+        filtered_phrases = _filter_keywords(phrases_extra)[:top_k]
+    
     return AnalysisResult(
         total_words=len(tokens),
         unique_words=len(set(tokens)),
-        top_keywords=merged_keywords,
-        top_ngrams=ngrams,
-        top_phrases=phrases,
+        top_keywords=filtered_keywords,
+        top_ngrams=filtered_ngrams,
+        top_phrases=filtered_phrases,
         cleaned_text=cleaned_text,
     )
