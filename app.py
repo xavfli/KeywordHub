@@ -1290,11 +1290,23 @@ def render_home() -> None:
         with col_left:
             st.markdown('<div class="dashboard-panel-title">1. Matn tahlili usulini tanlang</div>', unsafe_allow_html=True)
             
-            method_cols = st.columns(1)
+            current_method = st.session_state.get("method", "TF-IDF")
             for method_name in METHODS.keys():
                 icon, desc = METHODS[method_name]
-                if st.button(f"{icon} {method_name}", key=f"method_{method_name}", use_container_width=True):
-                    st.session_state["method"] = method_name
+                is_selected = method_name == current_method
+                
+                # Visual indicator for selected method
+                indicator = " ✓" if is_selected else ""
+                button_label = f"{icon} {method_name}{indicator}"
+                
+                # Highlight effect for selected button
+                if is_selected:
+                    st.markdown(f'<div style="border: 2px solid #4f46e5; border-radius: 10px; padding: 12px; background: #f1efff; margin-bottom: 8px; color: #111827;"><b style="font-size: 16px; color: #4f46e5;">{button_label}</b></div>', unsafe_allow_html=True)
+                else:
+                    if st.button(button_label, key=f"method_{method_name}", use_container_width=True):
+                        st.session_state["method"] = method_name
+                        st.rerun()
+                
                 st.caption(desc)
             
             compare = st.checkbox("Uslubni solishtirish")
