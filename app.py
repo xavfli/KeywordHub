@@ -12,7 +12,7 @@ from keywordhub.exporters import keywords_to_text, rows_to_csv_bytes
 
 
 DEMO_USERS = {"admin": "12345", "demo": "demo123", "asad": "12345"}
-KEYWORD_DISPLAY_LIMIT = 12
+KEYWORD_DISPLAY_LIMIT = 50
 ANALYSIS_TOP_LIMIT = 40
 METHODS = {
     "TF-IDF": ("Σ", "Eng muhim so'zlarni TF-IDF algoritmi yordamida topadi."),
@@ -1256,8 +1256,12 @@ def render_auth() -> None:
 
 def render_sidebar() -> None:
     st.markdown('<div class="side-section">', unsafe_allow_html=True)
-    st.markdown('<div class="side-brand"><span class="brand-mark">KW</span><span>KeyWord <span style="color:#4f46e5">AI</span></span></div>', unsafe_allow_html=True)
     st.markdown('<div class="side-nav-scope"></div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_topbar() -> None:
+    st.markdown('<div class="brand"><span class="brand-mark">KW</span><span>KeyWord <span style="color:#4f46e5">AI</span></span></div>', unsafe_allow_html=True)
     nav = [
         ("Asosiy sahifa", ":material/home:"),
         ("Tarix", ":material/history:"),
@@ -1265,41 +1269,12 @@ def render_sidebar() -> None:
         ("Sevimlilar", ":material/star:"),
         ("Yordam", ":material/help:"),
     ]
-    for page, icon in nav:
-        if st.button(page, key=f"nav_{page}", icon=icon, use_container_width=True):
-            set_page(page)
-            st.rerun()
-    st.markdown(
-        """
-        <div class="side-card pro">
-            <div class="side-card-title">Pro versiyaga o'ting</div>
-            <p class="side-card-copy">Cheksiz matn, ko'proq funksiyalar va ustuvor qo'llab-quvvatlash.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    if st.button("Pro versiyani ochish", type="primary", icon=":material/workspace_premium:", use_container_width=True):
-        st.info("Pro versiya demo loyihada maket sifatida ko'rsatilgan.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def render_topbar() -> None:
-    _, lang_col, account_col = st.columns([0.78, 0.08, 0.14], gap="small")
-    with lang_col:
-        st.selectbox("Til", ["UZ", "RU", "EN"], key="language", label_visibility="collapsed")
-    with account_col:
-        choice = st.selectbox(
-            "Akkaunt",
-            ["account", "logout"],
-            format_func=lambda value: f"A  {st.session_state['current_user'].title()}" if value == "account" else "Chiqish",
-            label_visibility="collapsed",
-        )
-    if choice == "logout":
-        st.session_state["is_authenticated"] = False
-        st.session_state["current_user"] = ""
-        st.session_state["auth_view"] = "login"
-        st.session_state["show_auth_page"] = False
-        st.rerun()
+    nav_cols = st.columns(len(nav), gap="small")
+    for idx, (page, icon) in enumerate(nav):
+        with nav_cols[idx]:
+            if st.button(page, key=f"nav_{page}", icon=icon, use_container_width=True):
+                set_page(page)
+                st.rerun()
 
 
 def render_home() -> None:
@@ -1311,19 +1286,20 @@ def render_home() -> None:
     st.markdown('<div class="page-title">Asosiy sahifa</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">Matn kiriting yoki fayl yuklab, eng muhim kalit so\'zlarni oling.</div>', unsafe_allow_html=True)
     with st.container(border=True):
-        col_left, col_right = st.columns([0.42, 0.58], gap="large")
+        col_left, col_right = st.columns([0.35, 0.65], gap="large")
         with col_left:
             st.markdown('<div class="dashboard-panel-title">1. Matn tahlili usulini tanlang</div>', unsafe_allow_html=True)
-            st.session_state["method"] = st.radio(
-                "Tahlil usuli",
-                list(METHODS.keys()),
-                captions=[METHODS[name][1] for name in METHODS],
-                key="method_radio",
-                label_visibility="collapsed",
-            )
+            
+            method_cols = st.columns(1)
+            for method_name in METHODS.keys():
+                icon, desc = METHODS[method_name]
+                if st.button(f"{icon} {method_name}", key=f"method_{method_name}", use_container_width=True):
+                    st.session_state["method"] = method_name
+                st.caption(desc)
+            
             compare = st.checkbox("Uslubni solishtirish")
         with col_right:
-            top_title, clear_col = st.columns([0.72, 0.28])
+            top_title, clear_col = st.columns([0.85, 0.15])
             with top_title:
                 st.markdown('<div class="dashboard-panel-title">2. Matn kiriting yoki fayl yuklang</div>', unsafe_allow_html=True)
             with clear_col:
@@ -1337,7 +1313,7 @@ def render_home() -> None:
                 '<div class="input-tabs"><span class="active"><i class="tab-icon">edit_note</i>Matn kiritish</span><span><i class="tab-icon">upload_file</i>Fayl yuklash</span></div>',
                 unsafe_allow_html=True,
             )
-            text_col, file_col = st.columns([0.58, 0.42], gap="medium")
+            text_col, file_col = st.columns([0.5, 0.5], gap="medium")
             with text_col:
                 text = st.text_area(
                     "Matn kiritish",
@@ -1401,7 +1377,8 @@ def render_home() -> None:
             st.warning("Tahlil qilish uchun matn kiriting yoki fayl yuklang.")
         else:
             with st.spinner("Matn tahlil qilinmoqda..."):
-                result = analyze_text(source_text, top_k=analysis_limit(source_text))
+                method = st.session_state.get("method", "TF-IDF")
+                result = analyze_text(source_text, top_k=analysis_limit(source_text), method=method)
             st.session_state["analysis_result"] = result
             st.session_state["analysis_history"].insert(
                 0,
@@ -1447,10 +1424,10 @@ def render_results(result: AnalysisResult) -> None:
         use_container_width=True,
     )
 
-    with st.expander("N-gramlar va muhim iboralar"):
+    with st.expander("📊 N-gramlar va muhim iboralar", expanded=False):
         sections = [
-            ("N-gramlar", result.top_ngrams),
-            ("Muhim iboralar", result.top_phrases),
+            ("📝 N-gramlar", result.top_ngrams),
+            ("💡 Muhim iboralar", result.top_phrases),
         ]
         for title, items in sections:
             st.markdown(f"#### {title}")
@@ -1458,9 +1435,11 @@ def render_results(result: AnalysisResult) -> None:
             if frame.empty:
                 st.info(f"{title} topilmadi.")
             else:
-                st.table(frame.set_index("№"))
+                styled_frame = frame.set_index("№").style.format(precision=4)
+                st.dataframe(styled_frame, use_container_width=True)
+            st.divider()
 
-    st.markdown("#### Barcha natijalar")
+    st.markdown("#### 📑 Barcha natijalar")
     st.text_area("Nusxalash uchun tayyor matn", value=result_text(result), height=180)
     rows = all_result_rows(result)
     c1, c2, c3 = st.columns(3)
@@ -1539,7 +1518,7 @@ def render_help() -> None:
 
 def render_dashboard() -> None:
     st.markdown('<div class="dashboard-layout">', unsafe_allow_html=True)
-    side_col, main_col = st.columns([0.18, 0.82], gap="large")
+    side_col, main_col = st.columns([0.05, 0.95], gap="large")
     with side_col:
         render_sidebar()
     with main_col:

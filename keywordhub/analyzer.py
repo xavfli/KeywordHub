@@ -687,11 +687,31 @@ def merge_keywords(*groups: Iterable[KeywordItem], top_k: int = 20) -> list[Keyw
     ]
 
 
-def analyze_text(text: str, top_k: int = 20) -> AnalysisResult:
+def analyze_text(text: str, top_k: int = 20, method: str = "TF-IDF") -> AnalysisResult:
     cleaned_text = " ".join(_normalize_text(_strip_markup_artifacts(text)).split())
     tokens = tokenize(cleaned_text)
-    freq_keywords = _build_frequency_keywords(tokens, top_k)
-    tfidf_keywords = _build_tfidf_keywords(cleaned_text, top_k)
+    
+    if method == "TF-IDF":
+        keywords = _build_tfidf_keywords(cleaned_text, top_k)
+    elif method == "N-gram":
+        keywords = _build_ngram_keywords(cleaned_text, top_k)
+    elif method == "TextRank":
+        keywords = merge_keywords(
+            _build_keybert_phrases(cleaned_text, top_k),
+            _build_tfidf_keywords(cleaned_text, top_k),
+            top_k=top_k,
+        )
+    elif method == "YAKE":
+        keywords = _build_frequency_keywords(tokens, top_k)
+    elif method == "RAKE":
+        keywords = _build_rake_phrases(cleaned_text, top_k)
+    else:
+        # Default: combine all methods
+        freq_keywords = _build_frequency_keywords(tokens, top_k)
+        tfidf_keywords = _build_tfidf_keywords(cleaned_text, top_k)
+        supported_keywords = _build_supported_keywords(tokens, _build_ngram_keywords(cleaned_text, top_k), [], top_k)
+        keywords = merge_keywords(freq_keywords, tfidf_keywords, supported_keywords, top_k=top_k)
+    
     ngrams = _build_ngram_keywords(cleaned_text, top_k)
     phrases = merge_keywords(
         _build_rake_phrases(cleaned_text, top_k),
@@ -699,21 +719,25 @@ def analyze_text(text: str, top_k: int = 20) -> AnalysisResult:
         _build_simple_phrases(cleaned_text, top_k),
         top_k=top_k,
     )
-    supported_keywords = _build_supported_keywords(tokens, ngrams, phrases, top_k)
-    merged_keywords = merge_keywords(freq_keywords, tfidf_keywords, supported_keywords, top_k=top_k)
     
     # Filter out supplementary keywords
-    filtered_keywords = _filter_keywords(merged_keywords)
+    filtered_keywords = _filter_keywords(keywords)
     filtered_ngrams = _filter_keywords(ngrams)
     filtered_phrases = _filter_keywords(phrases)
     
-    # Ensure we still have enough results by taking more and then filtering
+    # Ensure we still have enough results
     if len(filtered_keywords) < top_k:
-        freq_keywords_extra = _build_frequency_keywords(tokens, top_k * 2)
-        tfidf_keywords_extra = _build_tfidf_keywords(cleaned_text, top_k * 2)
-        supported_keywords_extra = _build_supported_keywords(tokens, ngrams, phrases, top_k * 2)
-        merged_keywords_extra = merge_keywords(freq_keywords_extra, tfidf_keywords_extra, supported_keywords_extra, top_k=top_k * 2)
-        filtered_keywords = _filter_keywords(merged_keywords_extra)[:top_k]
+        if method == "TF-IDF":
+            keywords_extra = _build_tfidf_keywords(cleaned_text, top_k * 2)
+        elif method == "N-gram":
+            keywords_extra = _build_ngram_keywords(cleaned_text, top_k * 2)
+        elif method == "RAKE":
+            keywords_extra = _build_rake_phrases(cleaned_text, top_k * 2)
+        else:
+            freq_keywords_extra = _build_frequency_keywords(tokens, top_k * 2)
+            tfidf_keywords_extra = _build_tfidf_keywords(cleaned_text, top_k * 2)
+            keywords_extra = merge_keywords(freq_keywords_extra, tfidf_keywords_extra, top_k=top_k * 2)
+        filtered_keywords = _filter_keywords(keywords_extra)[:top_k]
     
     if len(filtered_ngrams) < top_k:
         ngrams_extra = _build_ngram_keywords(cleaned_text, top_k * 2)
