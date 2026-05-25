@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import html
+import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +16,10 @@ from keywordhub.exporters import keywords_to_text, rows_to_csv_bytes
 DEMO_USERS = {"admin": "12345", "demo": "demo123", "asad": "12345"}
 KEYWORD_DISPLAY_LIMIT = 50
 ANALYSIS_TOP_LIMIT = 40
+DATA_DIR = Path(__file__).resolve().parent / "data"
+HISTORY_FILE = DATA_DIR / "analysis_history.json"
+FAVORITES_FILE = DATA_DIR / "favorites.json"
+DOCUMENTS_FILE = DATA_DIR / "documents.json"
 METHODS = {
     "TF-IDF": ("Σ", "Eng muhim so'zlarni TF-IDF algoritmi yordamida topadi."),
     "N-gram": ("N", "So'z birikmalarini, bi-gram va tri-gramlarni aniqlaydi."),
@@ -396,7 +402,9 @@ st.markdown(
 
     .side-section {
         border-right: 1px solid var(--line);
-        min-height: calc(100vh - 70px);
+        height: 0;
+        min-height: 0;
+        margin-top: 0;
         padding-right: 14px;
     }
 
@@ -427,7 +435,8 @@ st.markdown(
         margin: 0;
     }
 
-    .side-nav-scope + div .stButton button {
+    .side-nav-scope + div .stButton button,
+    .side-nav-scope ~ div .stButton button {
         justify-content: flex-start !important;
         min-height: 48px !important;
         border-radius: 10px !important;
@@ -438,10 +447,35 @@ st.markdown(
         font-weight: 700 !important;
     }
 
-    .side-nav-scope + div .stButton button:hover {
+    .side-nav-scope + div .stButton button:hover,
+    .side-nav-scope ~ div .stButton button:hover {
         background: var(--accent-soft) !important;
         color: var(--accent) !important;
         border-color: transparent !important;
+    }
+
+    .side-nav-active {
+        min-height: 48px;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        font-weight: 800;
+        border: 1px solid #dad7ff;
+        margin-bottom: 0.5rem;
+    }
+
+    .side-nav-active .material-symbols-rounded {
+        font-size: 22px;
+    }
+
+    .clear-button-scope + div .stButton button {
+        min-width: 118px !important;
+        white-space: nowrap !important;
+        justify-content: center !important;
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -895,8 +929,63 @@ st.markdown(
         font-size: 15px;
     }
 
+    .insight-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin: 18px 0 8px;
+    }
+
+    .insight-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #ffffff;
+        padding: 16px;
+        min-height: 118px;
+        box-shadow: 0 8px 20px rgba(17, 24, 39, 0.04);
+    }
+
+    .insight-label {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+    }
+
+    .insight-value {
+        color: #111827;
+        font-size: 18px;
+        line-height: 1.4;
+        font-weight: 800;
+    }
+
+    .keyword-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 12px 0 22px;
+    }
+
+    .keyword-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        border-radius: 999px;
+        padding: 0 13px;
+        background: #eef7ff;
+        border: 1px solid #cce7ff;
+        color: #075985;
+        font-weight: 800;
+        font-size: 14px;
+    }
+
     @media (max-width: 900px) {
         .keyword-result-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .insight-grid {
             grid-template-columns: 1fr;
         }
     }
@@ -940,7 +1029,119 @@ st.markdown(
 )
 
 
+def load_json_list(path: Path) -> list[dict]:
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return [item for item in data if isinstance(item, dict)]
+    except (OSError, json.JSONDecodeError):
+        return []
+    return []
+
+
+def save_json_list(path: Path, rows: list[dict]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def save_persistent_state() -> None:
+    save_json_list(HISTORY_FILE, st.session_state.get("analysis_history", []))
+    save_json_list(FAVORITES_FILE, st.session_state.get("favorites", []))
+    save_json_list(DOCUMENTS_FILE, st.session_state.get("documents", []))
+
+
+def detect_language(text: str) -> str:
+    lowered = text.lower()
+    if re.search(r"[а-яё]", lowered):
+        return "Rus tili"
+    english_hits = len(re.findall(r"\b(the|and|with|for|from|this|that|technology|data)\b", lowered))
+    uzbek_hits = len(re.findall(r"\b(va|ham|bilan|uchun|matn|kalit|so'z|bo'lgan|qiladi)\b", lowered))
+    if english_hits > uzbek_hits:
+        return "Ingliz tili"
+    return "O'zbek tili"
+
+
+TOPIC_KEYWORDS = {
+    "Texnologiya": {"texnologiya", "sun'iy", "intellekt", "ai", "dastur", "raqamli", "data", "ma'lumot", "blockchain"},
+    "Ta'lim": {"ta'lim", "o'quv", "talaba", "maktab", "universitet", "dars", "bilim", "pedagog"},
+    "Ekologiya": {"ekologiya", "tabiat", "atrof", "muhit", "iqlim", "suv", "havo", "chiqindi"},
+    "Marketing": {"marketing", "reklama", "brend", "mijoz", "savdo", "strategiya", "bozor"},
+    "Iqtisod": {"iqtisod", "moliya", "bank", "narx", "bozor", "investitsiya", "daromad"},
+}
+
+
+def detect_topic(result: AnalysisResult) -> str:
+    terms = " ".join(item.term.lower() for item in result.top_keywords[:20])
+    scores = {
+        topic: sum(1 for keyword in keywords if keyword in terms)
+        for topic, keywords in TOPIC_KEYWORDS.items()
+    }
+    topic, score = max(scores.items(), key=lambda item: item[1])
+    return topic if score else "Umumiy matn"
+
+
+def build_short_summary(result: AnalysisResult) -> str:
+    keywords = [item.term for item in result.top_keywords[:5]]
+    if not keywords:
+        return "Matnda yetarli kalit so'z topilmadi."
+    topic = detect_topic(result)
+    return f"Matn asosan {topic.lower()} mavzusiga yaqin. Eng muhim kalitlar: {', '.join(keywords)}."
+
+
+def pdf_escape(text: str) -> str:
+    safe = text.encode("cp1252", errors="replace").decode("cp1252")
+    return safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def build_pdf_bytes(title: str, lines: list[str]) -> bytes:
+    stream_lines = ["BT", "/F1 16 Tf", "50 800 Td", f"({pdf_escape(title)}) Tj"]
+    stream_lines.append("/F1 10 Tf")
+    stream_lines.append("0 -24 Td")
+    for line in lines[:46]:
+        stream_lines.append(f"({pdf_escape(line[:95])}) Tj")
+        stream_lines.append("0 -14 Td")
+    stream_lines.append("ET")
+    content = "\n".join(stream_lines).encode("cp1252", errors="replace")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(content)).encode("ascii") + b" >>\nstream\n" + content + b"\nendstream",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode("ascii"))
+    return bytes(pdf)
+
+
+def result_pdf_bytes(result: AnalysisResult) -> bytes:
+    lines = [
+        f"So'zlar soni: {result.total_words}",
+        f"Unikal so'zlar: {result.unique_words}",
+        f"Til: {detect_language(result.cleaned_text)}",
+        f"Mavzu: {detect_topic(result)}",
+        "",
+        "Kalit so'zlar:",
+    ]
+    lines.extend(f"{idx}. {item.term} ({item.score})" for idx, item in enumerate(result.top_keywords[:25], start=1))
+    return build_pdf_bytes("KeyWord AI - Tahlil natijalari", lines)
+
+
 def init_state() -> None:
+    history = load_json_list(HISTORY_FILE)
+    documents = load_json_list(DOCUMENTS_FILE)
+    favorites = load_json_list(FAVORITES_FILE)
     defaults = {
         "is_authenticated": False,
         "current_user": "",
@@ -955,10 +1156,11 @@ def init_state() -> None:
         "analysis_text_input": "",
         "pending_analysis_text": None,
         "last_uploaded_file_id": "",
-        "analysis_history": [],
-        "documents": [],
-        "favorites": [],
+        "analysis_history": history,
+        "documents": documents,
+        "favorites": favorites,
         "language": "UZ",
+        "method_compare": [],
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -1072,6 +1274,29 @@ def render_keyword_cards(items: list[KeywordItem]) -> None:
         "</div>"
         f'<div class="keyword-result-grid">{card_html}</div>'
         "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_keyword_chips(items: list[KeywordItem], limit: int = 14) -> None:
+    chips = "".join(
+        f'<span class="keyword-chip">{html.escape(item.term)}</span>'
+        for item in items[:limit]
+    )
+    if chips:
+        st.markdown(f'<div class="keyword-chip-row">{chips}</div>', unsafe_allow_html=True)
+
+
+def render_analysis_insights(result: AnalysisResult) -> None:
+    language = detect_language(result.cleaned_text)
+    topic = detect_topic(result)
+    summary = build_short_summary(result)
+    st.markdown(
+        '<div class="insight-grid">'
+        f'<div class="insight-card"><div class="insight-label">Til</div><div class="insight-value">{html.escape(language)}</div></div>'
+        f'<div class="insight-card"><div class="insight-label">Mavzu</div><div class="insight-value">{html.escape(topic)}</div></div>'
+        f'<div class="insight-card"><div class="insight-label">Qisqa xulosa</div><div class="insight-value">{html.escape(summary)}</div></div>'
+        '</div>',
         unsafe_allow_html=True,
     )
 
@@ -1257,11 +1482,6 @@ def render_auth() -> None:
 def render_sidebar() -> None:
     st.markdown('<div class="side-section">', unsafe_allow_html=True)
     st.markdown('<div class="side-nav-scope"></div>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def render_topbar() -> None:
-    st.markdown('<div class="brand"><span class="brand-mark">KW</span><span>KeyWord <span style="color:#4f46e5">AI</span></span></div>', unsafe_allow_html=True)
     nav = [
         ("Asosiy sahifa", ":material/home:"),
         ("Tarix", ":material/history:"),
@@ -1269,12 +1489,24 @@ def render_topbar() -> None:
         ("Sevimlilar", ":material/star:"),
         ("Yordam", ":material/help:"),
     ]
-    nav_cols = st.columns(len(nav), gap="small")
-    for idx, (page, icon) in enumerate(nav):
-        with nav_cols[idx]:
-            if st.button(page, key=f"nav_{page}", icon=icon, use_container_width=True):
-                set_page(page)
-                st.rerun()
+    for page, icon in nav:
+        if st.session_state.get("page") == page:
+            icon_name = icon.replace(":material/", "").replace(":", "")
+            st.markdown(
+                f'<div class="side-nav-active"><span class="material-symbols-rounded">{icon_name}</span>{page}</div>',
+                unsafe_allow_html=True,
+            )
+        elif st.button(page, key=f"side_nav_{page}", icon=icon, use_container_width=True):
+            set_page(page)
+            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_topbar() -> None:
+    st.markdown(
+        '<div class="brand"><span class="brand-mark">KW</span><span>KeyWord <span style="color:#4f46e5">AI</span></span></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_home() -> None:
@@ -1311,10 +1543,11 @@ def render_home() -> None:
             
             compare = st.checkbox("Uslubni solishtirish")
         with col_right:
-            top_title, clear_col = st.columns([0.85, 0.15])
+            top_title, clear_col = st.columns([0.78, 0.22])
             with top_title:
                 st.markdown('<div class="dashboard-panel-title">2. Matn kiriting yoki fayl yuklang</div>', unsafe_allow_html=True)
             with clear_col:
+                st.markdown('<div class="clear-button-scope"></div>', unsafe_allow_html=True)
                 if st.button("Tozalash", icon=":material/delete:", use_container_width=True):
                     st.session_state["analysis_text"] = ""
                     st.session_state["analysis_text_input"] = ""
@@ -1360,6 +1593,8 @@ def render_home() -> None:
                                     "Yuklangan sana": datetime.now().strftime("%d.%m.%Y %H:%M"),
                                 },
                             )
+                            st.session_state["documents"] = docs[:50]
+                            save_persistent_state()
                         st.success("Fayldagi matn o'qildi.")
                         st.rerun()
                     except ValueError as exc:
@@ -1391,6 +1626,16 @@ def render_home() -> None:
             with st.spinner("Matn tahlil qilinmoqda..."):
                 method = st.session_state.get("method", "TF-IDF")
                 result = analyze_text(source_text, top_k=analysis_limit(source_text), method=method)
+                if compare:
+                    st.session_state["method_compare"] = [
+                        {
+                            "Usul": method_name,
+                            "Kalit so'zlar": len(analyze_text(source_text, top_k=analysis_limit(source_text), method=method_name).top_keywords),
+                        }
+                        for method_name in METHODS
+                    ]
+                else:
+                    st.session_state["method_compare"] = []
             st.session_state["analysis_result"] = result
             st.session_state["analysis_history"].insert(
                 0,
@@ -1401,6 +1646,8 @@ def render_home() -> None:
                     "Sana": datetime.now().strftime("%d.%m.%Y %H:%M"),
                 },
             )
+            st.session_state["analysis_history"] = st.session_state["analysis_history"][:50]
+            save_persistent_state()
             st.success("Tahlil tayyor.")
 
     if st.session_state.get("analysis_result") is not None:
@@ -1411,10 +1658,18 @@ def render_home() -> None:
 
 def render_results(result: AnalysisResult) -> None:
     st.markdown("### Tahlil natijalari")
-    m1, m2, m3 = st.columns(3)
+    render_analysis_insights(result)
+    render_keyword_chips(result.top_keywords)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("So'zlar soni", result.total_words)
     m2.metric("Unikal so'zlar", result.unique_words)
     m3.metric("Top kalitlar", len(result.top_keywords))
+    m4.metric("Mavzu", detect_topic(result))
+
+    if st.session_state.get("method_compare"):
+        st.markdown("#### Uslublar solishtiruvi")
+        compare_frame = pd.DataFrame(st.session_state["method_compare"])
+        st.bar_chart(compare_frame.set_index("Usul"))
 
     render_keyword_cards(result.top_keywords)
     keyword_frame = items_frame(result.top_keywords[:KEYWORD_DISPLAY_LIMIT])
@@ -1454,14 +1709,27 @@ def render_results(result: AnalysisResult) -> None:
     st.markdown("#### 📑 Barcha natijalar")
     st.text_area("Nusxalash uchun tayyor matn", value=result_text(result), height=180)
     rows = all_result_rows(result)
-    c1, c2, c3 = st.columns(3)
+    if st.checkbox("Tozalangan matn va filtrlash tafsilotlarini ko'rsatish"):
+        st.text_area("Tozalangan matn", value=result.cleaned_text, height=140)
+        st.info("Qo'shimcha so'zlar va stopwordlar tahlil jarayonida avtomatik filtrlanadi.")
+
+    c1, c2, c3, c4 = st.columns(4)
     c1.download_button("Barchasini TXT yuklab olish", data=result_text(result).encode("utf-8"), file_name="analysis_all.txt", mime="text/plain", icon=":material/download:", use_container_width=True)
     c2.download_button("Barchasini CSV yuklab olish", data=rows_to_csv_bytes(["Type", "Term", "Score", "Source"], rows), file_name="analysis_all.csv", mime="text/csv", icon=":material/download:", use_container_width=True)
-    if c3.button("Sevimlilarga qo'shish", icon=":material/star:", use_container_width=True):
+    c3.download_button("PDF yuklab olish", data=result_pdf_bytes(result), file_name="analysis_report.pdf", mime="application/pdf", icon=":material/picture_as_pdf:", use_container_width=True)
+    if c4.button("Sevimlilarga qo'shish", icon=":material/star:", use_container_width=True):
         if not result.top_keywords:
             st.warning("Sevimlilarga qo'shish uchun natija yo'q.")
         else:
-            st.session_state["favorites"] = items_frame(result.top_keywords).head(10).to_dict("records")
+            favorite = {
+                "Sana": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                "Mavzu": detect_topic(result),
+                "Til": detect_language(result.cleaned_text),
+                "Kalit so'zlar": keyword_summary(result, limit=10),
+            }
+            st.session_state["favorites"].insert(0, favorite)
+            st.session_state["favorites"] = st.session_state["favorites"][:50]
+            save_persistent_state()
             st.success("Natija sevimlilarga qo'shildi.")
 
 
@@ -1530,7 +1798,7 @@ def render_help() -> None:
 
 def render_dashboard() -> None:
     st.markdown('<div class="dashboard-layout">', unsafe_allow_html=True)
-    side_col, main_col = st.columns([0.05, 0.95], gap="large")
+    side_col, main_col = st.columns([0.20, 0.80], gap="large")
     with side_col:
         render_sidebar()
     with main_col:
